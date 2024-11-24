@@ -1,5 +1,14 @@
-#include "utils.cu"
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include <cmath>
 
+#define TRAIN_IMAGE "train-images-idx3-ubyte"
+#define TRAIN_LABEL "train-labels-idx1-ubyte"
+#define TEST_IMAGE "t10k-images-idx3-ubyte"
+#define TEST_LABEL "t10k-labels-idx1-ubyte"
+
+// Reverse integer bytes for MNIST file format
 int reverseInt(int i) {
     unsigned char c1, c2, c3, c4;
     c1 = i & 255;
@@ -9,62 +18,50 @@ int reverseInt(int i) {
     return ((int)c1 << 24) + ((int)c2 << 16) + ((int)c3 << 8) + c4;
 }
 
-
-Matrix* read_mnist_labels(const char *path) {
-    FILE *file = fopen(path, "rb");
+float* readLabels(const char* path, int* num_labels) {
+    FILE* file = fopen(path, "rb");
     if (file == NULL) {
         perror("Error opening file");
         return nullptr;
     }
 
     int magic_number = 0;
-    int number_of_labels = 0;
-
     fread(&magic_number, sizeof(magic_number), 1, file);
     magic_number = reverseInt(magic_number);
 
-    fread(&number_of_labels, sizeof(number_of_labels), 1, file);
-    number_of_labels = reverseInt(number_of_labels);
-    
-    Matrix* labels = allocMatrix(number_of_labels, 1);
+    fread(num_labels, sizeof(*num_labels), 1, file);
+    *num_labels = reverseInt(*num_labels);
 
     if (magic_number != 2049) {
         printf("Invalid magic number: %d. Expected 2049 for label file.\n", magic_number);
         fclose(file);
         return nullptr;
     }
-    
-    labels->rowSize = number_of_labels;
-    labels->colSize = 1; 
-    
-    for (int i = 0; i < number_of_labels; ++i) {
+
+    float* labels = (float*)malloc((*num_labels) * sizeof(float));
+    for (int i = 0; i < *num_labels; ++i) {
         unsigned char temp = 0;
         fread(&temp, sizeof(temp), 1, file);
-        labels->val[i] = (float)temp;  
+        labels[i] = (float)temp;
     }
 
     fclose(file);
-
     return labels;
 }
 
-Matrix* read_mnist_images(const char *path) {
-    FILE *file = fopen(path, "rb");
+float* readImages(const char* path, int* num_images, int* image_size) {
+    FILE* file = fopen(path, "rb");
     if (file == NULL) {
         perror("Error opening file");
         return nullptr;
     }
 
-    int magic_number = 0;
-    int number_of_images = 0;
-    int n_rows = 0;
-    int n_cols = 0;
-
+    int magic_number = 0, n_rows = 0, n_cols = 0;
     fread(&magic_number, sizeof(magic_number), 1, file);
     magic_number = reverseInt(magic_number);
 
-    fread(&number_of_images, sizeof(number_of_images), 1, file);
-    number_of_images = reverseInt(number_of_images);
+    fread(num_images, sizeof(*num_images), 1, file);
+    *num_images = reverseInt(*num_images);
 
     fread(&n_rows, sizeof(n_rows), 1, file);
     n_rows = reverseInt(n_rows);
@@ -72,58 +69,76 @@ Matrix* read_mnist_images(const char *path) {
     fread(&n_cols, sizeof(n_cols), 1, file);
     n_cols = reverseInt(n_cols);
 
-
-    if (n_rows != 28 || n_cols != 28) {
-        printf("Unexpected image dimensions: %d x %d. MNIST expects 28x28.\n", n_rows, n_cols);
+    if (magic_number != 2051 || n_rows != 28 || n_cols != 28) {
+        printf("Invalid file format or dimensions. MNIST expects 28x28 images.\n");
         fclose(file);
         return nullptr;
     }
 
-    Matrix* images = allocMatrix(number_of_images, n_cols * n_rows);
+    *image_size = n_rows * n_cols;
+    float* images = (float*)malloc((*num_images) * (*image_size) * sizeof(float));
 
-    for (int i = 0; i < number_of_images; ++i) {
-        for (int r = 0; r < n_rows; ++r) {
-            for (int c = 0; c < n_cols; ++c) {
-                unsigned char temp = 0;
-                fread(&temp, sizeof(temp), 1, file);
-                images->val[i * (n_rows * n_cols) + r * n_cols + c] = (float)(temp) / 255.0f;  // Normalize to [0, 1]
-            }
+    for (int i = 0; i < *num_images; ++i) {
+        for (int j = 0; j < *image_size; ++j) {
+            unsigned char temp = 0;
+            fread(&temp, sizeof(temp), 1, file);
+            images[i * (*image_size) + j] = (float)temp / 255.0f;  // Normalize to [0, 1]
         }
     }
 
     fclose(file);
-
     return images;
 }
 
-int main() {
-    Matrix* train_images = read_mnist_images(TRAIN_IMAGE); 
-    Matrix* test_images = read_mnist_images(TEST_IMAGE);
-    Matrix* train_labels = read_mnist_labels(TRAIN_LABEL);
-    Matrix* test_labels = read_mnist_labels(TEST_LABEL);
-    
-    int upper_size = 10;
-    // Display the first 10 images for verification
-    for (int k = 0; k < upper_size; k++) {
-        printf("Image %d:\n", k + 1);
-        Matrix *img = train_images->getRow(k);
-        for (int r = 0; r < 28; r++) {
-            for (int c = 0; c < 28; c++) {
-                if (img->val[r * 28 + c] > 0.0)
-                    printf("* ");
-                else
-                    printf(" ");
+void displayImg(const float* image, int rows, int cols) {
+    for (int r = 0; r < rows; ++r) {
+        for (int c = 0; c < cols; ++c) {
+            if (image[r * cols + c] > 0.0f) {
+                printf("* ");
+            } else {
+                printf("  ");
             }
-            printf("\n");
-            
         }
-        printf("\nLabel: %s\n", getLabelByIdx((int)train_labels->val[k]));
+        printf("\n");
+    }
+}
+
+const char* getLabelByIdx(int label) {
+    static char buffer[10];
+    snprintf(buffer, sizeof(buffer), "%d", label);
+    return buffer;
+}
+
+int main() {
+    int train_image_count, train_label_count, test_image_count, test_label_count;
+    int image_size;
+
+    float* train_images = readImages(TRAIN_IMAGE, &train_image_count, &image_size);
+    float* test_images = readImages(TEST_IMAGE, &test_image_count, &image_size);
+    float* train_labels = readLabels(TRAIN_LABEL, &train_label_count);
+    float* test_labels = readLabels(TEST_LABEL, &test_label_count);
+
+    if (!train_images || !test_images || !train_labels || !test_labels) {
+        printf("Failed to load MNIST data.\n");
+        free(train_images);
+        free(test_images);
+        free(train_labels);
+        free(test_labels);
+        return 1;
+    }
+
+    int upper_size = 10;
+    for (int k = 0; k < upper_size; ++k) {
+        printf("Image %d:\n", k + 1);
+        displayImg(&train_images[k * image_size], 28, 28);
+        printf("\nLabel: %s\n", getLabelByIdx((int)train_labels[k]));
         printf("********************************************************\n");
     }
 
-    freeMatrix(train_images);
-    freeMatrix(test_images);
-    freeMatrix(test_labels);
-    freeMatrix(train_labels);
+    free(train_images);
+    free(test_images);
+    free(train_labels);
+    free(test_labels);
+
     return 0;
 }
