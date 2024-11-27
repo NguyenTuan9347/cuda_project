@@ -2,12 +2,94 @@
 #include <cstdlib>
 #include <cstring>
 #include <cmath>
+#include <stdio.h>
+#include <stdlib.h>
+#include <cuda_runtime.h>
+#include <math.h>
+
+#define MAX_IMAGESIZE 784  // 28x28 flattened size
+#define NUM_TRAIN 60000
+#define NUM_TEST 10000
+#define SIZE 784
+
+#define TRAIN_IMAGE "./fashion/train-images-idx3-ubyte"
+#define TRAIN_LABEL "./fashion/train-labels-idx1-ubyte"
+#define TEST_IMAGE "./fashion/t10k-images-idx3-ubyte"
+#define TEST_LABEL "./fashion/t10k-labels-idx1-ubyte"
+#define HIDDEN_SIZE 128
+
+#define CHECK(call)\
+{\
+    cudaError_t errorSync = call;\
+    cudaError_t errorASync = cudaPeekAtLastError();\
+    if (errorSync != cudaSuccess)\
+    {\
+        fprintf(stderr, "Error: %s:%d, ", __FILE__, __LINE__);\
+        fprintf(stderr, "code: %d, reason: %s\n", errorSync,\
+                cudaGetErrorString(errorSync));\
+        exit(EXIT_FAILURE);\
+    }\
+    if (errorASync != cudaSuccess)\
+    {\
+        fprintf(stderr, "Error: %s:%d, ", __FILE__, __LINE__);\
+        fprintf(stderr, "code: %d, reason: %s\n", errorASync,\
+                cudaGetErrorString(errorASync));\
+        exit(EXIT_FAILURE);\
+    }\
+}
+
+// Allocate memory for a matrix
+float* allocMatrix(int rowSize, int colSize = 1) {
+    return (float*)malloc(rowSize * colSize * sizeof(float));
+}
+
+// Free allocated memory
+void freeMatrix(float* matrix) {
+    if (matrix) {
+        free(matrix);
+    }
+}
+
+// Initialize a random matrix
+float* initRandomMatrix(int rowSize, int colSize = 1, float lower = 0.0, float upper = 1.0) {
+    int size = rowSize * colSize;
+    float* res = allocMatrix(rowSize, colSize);
+    for (int i = 0; i < size; i++) {
+        res[i] = lower + static_cast<float>(rand()) / (static_cast<float>(RAND_MAX / (upper - lower)));
+    }
+    return res;
+}
+
+// Copy values from one matrix to another
+void copyMatrix(float* dest, float* src, int size) {
+    for (int i = 0; i < size; i++) {
+        dest[i] = src[i];
+    }
+}
+
+// Get label for a given index
+const char* getLabelByIdx(int idx) {
+    switch (idx) {
+        case 0: return "T-shirt/top";
+        case 1: return "Trouser";
+        case 2: return "Pullover";
+        case 3: return "Dress";
+        case 4: return "Coat";
+        case 5: return "Sandal";
+        case 6: return "Shirt";
+        case 7: return "Sneaker";
+        case 8: return "Bag";
+        case 9: return "Ankle boot";
+        default: return "Not exist label";
+    }
+}
 
 #define TRAIN_IMAGE "train-images-idx3-ubyte"
 #define TRAIN_LABEL "train-labels-idx1-ubyte"
 #define TEST_IMAGE "t10k-images-idx3-ubyte"
 #define TEST_LABEL "t10k-labels-idx1-ubyte"
-
+#define NUM_HIDDEN_LAYERS 2
+#define TILE_k 32
 // Reverse integer bytes for MNIST file format
 int reverseInt(int i) {
     unsigned char c1, c2, c3, c4;
@@ -114,31 +196,20 @@ int main() {
     int image_size;
 
     float* train_images = readImages(TRAIN_IMAGE, &train_image_count, &image_size);
-    float* test_images = readImages(TEST_IMAGE, &test_image_count, &image_size);
     float* train_labels = readLabels(TRAIN_LABEL, &train_label_count);
-    float* test_labels = readLabels(TEST_LABEL, &test_label_count);
 
-    if (!train_images || !test_images || !train_labels || !test_labels) {
+    if (!train_images || !train_labels) {
         printf("Failed to load MNIST data.\n");
-        free(train_images);
-        free(test_images);
-        free(train_labels);
-        free(test_labels);
         return 1;
     }
 
-    int upper_size = 10;
-    for (int k = 0; k < upper_size; ++k) {
-        printf("Image %d:\n", k + 1);
-        displayImg(&train_images[k * image_size], 28, 28);
-        printf("\nLabel: %s\n", getLabelByIdx((int)train_labels[k]));
-        printf("********************************************************\n");
-    }
+    const int hiddenSize = 128;
+    const int numHiddenLayers = 2;
+    const int outputSize = 10;
+    const int epochs = 10;
+    const float learningRate = 0.01f;
 
-    free(train_images);
-    free(test_images);
-    free(train_labels);
-    free(test_labels);
+   
 
     return 0;
 }
