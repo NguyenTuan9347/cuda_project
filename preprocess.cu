@@ -7,6 +7,8 @@
 #include <cuda_runtime.h>
 #include <math.h>
 
+#define NUM_HIDDEN_LAYERS 2
+#define TILE_k 32
 #define MAX_IMAGESIZE 784  // 28x28 flattened size
 #define NUM_TRAIN 60000
 #define NUM_TEST 10000
@@ -17,6 +19,7 @@
 #define TEST_IMAGE "./fashion/t10k-images-idx3-ubyte"
 #define TEST_LABEL "./fashion/t10k-labels-idx1-ubyte"
 #define HIDDEN_SIZE 128
+
 
 #define CHECK(call)\
 {\
@@ -83,13 +86,6 @@ const char* getLabelByIdx(int idx) {
         default: return "Not exist label";
     }
 }
-
-#define TRAIN_IMAGE "train-images-idx3-ubyte"
-#define TRAIN_LABEL "train-labels-idx1-ubyte"
-#define TEST_IMAGE "t10k-images-idx3-ubyte"
-#define TEST_LABEL "t10k-labels-idx1-ubyte"
-#define NUM_HIDDEN_LAYERS 2
-#define TILE_k 32
 // Reverse integer bytes for MNIST file format
 int reverseInt(int i) {
     unsigned char c1, c2, c3, c4;
@@ -185,31 +181,287 @@ void displayImg(const float* image, int rows, int cols) {
     }
 }
 
-const char* getLabelByIdx(int label) {
-    static char buffer[10];
-    snprintf(buffer, sizeof(buffer), "%d", label);
-    return buffer;
+// CUDA kernel for matrix multiplication with tiling
+__global__ void matrixMultiKernel(float* A, float* B, float* C, int m, int n, int k) {
+    __shared__ float s_A[TILE_k][TILE_k];
+    __shared__ float s_B[TILE_k][TILE_k];
+
+    int row = blockIdx.y * blockDim.y + threadIdx.y;
+    int col = blockIdx.x * blockDim.x + threadIdx.x;
+
+    float s = 0.0f;
+
+    for (int batch_idx = 0; batch_idx < (n + TILE_k - 1) / TILE_k; batch_idx++) {
+        int A_col = batch_idx * TILE_k + threadIdx.x;
+        int B_row = batch_idx * TILE_k + threadIdx.y;
+
+        // Load tiles into shared memory
+        s_A[threadIdx.y][threadIdx.x] = (row < m && A_col < n) ? A[row * n + A_col] : 0.0f;
+        s_B[threadIdx.y][threadIdx.x] = (col < k && B_row < n) ? B[B_row * k + col] : 0.0f;
+
+        __syncthreads();
+
+        // Perform partial matrix multiplication
+        for (int i = 0; i < TILE_k; i++) {
+            s += s_A[threadIdx.y][i] * s_B[i][threadIdx.x];
+        }
+
+        __syncthreads();
+    }
+
+    // Write the result to the output matrix
+    if (row < m && col < k) {
+        C[row * k + col] = s;
+    }
+}
+
+// Matrix multiplication wrapper
+void matrixMultiplication(float* A, int m, int n, float* B, int k, float* C, bool useDevice = false, dim3 blockSize = dim3(1)) {
+    if (!useDevice) {
+        for (int i = 0; i < m; i++) {
+            for (int j = 0; j < k; j++) {
+                float sum = 0.0f;
+                for (int t = 0; t < n; t++) {
+                    sum += A[i * n + t] * B[t * k + j];
+                }
+                C[i * k + j] = sum;
+            }
+        }
+    } else {
+        float *d_A, *d_B, *d_C;
+        cudaMalloc((void**)&d_A, m * n * sizeof(float));
+        cudaMalloc((void**)&d_B, n * k * sizeof(float));
+        cudaMalloc((void**)&d_C, m * k * sizeof(float));
+
+        cudaMemcpy(d_A, A, m * n * sizeof(float), cudaMemcpyHostToDevice);
+        cudaMemcpy(d_B, B, n * k * sizeof(float), cudaMemcpyHostToDevice);
+
+        dim3 gridSize((k + blockSize.x - 1) / blockSize.x, (m + blockSize.y - 1) / blockSize.y);
+        matrixMultiKernel<<<gridSize, blockSize>>>(d_A, d_B, d_C, m, n, k);
+
+        cudaMemcpy(C, d_C, m * k * sizeof(float), cudaMemcpyDeviceToHost);
+
+        cudaFree(d_A);
+        cudaFree(d_B);
+        cudaFree(d_C);
+    }
+}
+
+// Apply ReLU activation
+void applyRelu(float* data, int size) {
+    for (int i = 0; i < size; i++) {
+        data[i] = data[i] > 0 ? data[i] : 0;
+    }
+}
+
+// Compute softmax activation
+void softmax(float* input, int size) {
+    float sum = 0.0f;
+    for (int i = 0; i < size; i++) {
+        input[i] = expf(input[i]);
+        sum += input[i];
+    }
+    for (int i = 0; i < size; i++) {
+        input[i] /= sum;
+    }
+}
+
+// Forward pass
+void forward(float* input, int inputSize, float** hiddenWeights, float** activations, float* output, int outputSize, bool useDevice = false, dim3 blockSize = dim3(1)) {
+    float* currentInput = input;
+    int currentInputSize = inputSize;
+    
+    for (int i = 0; i < NUM_HIDDEN_LAYERS - 1; i++) {
+        matrixMultiplication(currentInput, 1, currentInputSize, hiddenWeights[i], HIDDEN_SIZE, activations[i], useDevice, blockSize);
+        
+        // ReLU activation
+        applyRelu(activations[i], HIDDEN_SIZE);
+        
+        // Update for next layer
+        currentInputSize = HIDDEN_SIZE;
+        currentInput = activations[i];
+    }
+    
+    // Final layer multiplication to output
+    matrixMultiplication(currentInput, 1, HIDDEN_SIZE, 
+                         hiddenWeights[NUM_HIDDEN_LAYERS-1], outputSize, 
+                         output, useDevice, blockSize);
+    
+    // Apply softmax to output layer
+    softmax(output, outputSize);
+}
+
+// Compute loss (cross-entropy)
+float computeLoss(float* output, int label, int size) {
+    float loss = 0.0f;
+    float *labels = (float*) malloc(sizeof(float)* size);
+    for(int i =0;i< size;i++) labels[i] = 0.0;
+    labels[label] = 1.0;
+    for (int i = 0; i < size; i++) {
+        loss -= labels[i] * logf(output[i]);
+    }
+    free(labels);
+    return loss;
+}
+
+// Backward pass with proper gradient computation
+void backward(float* output, float targetLabel, float** hiddenWeights, float** gradients, 
+              float** activations, int outputSize, int inputSize) {
+    // Compute output layer gradients (cross-entropy loss derivative)
+    float* outputGradients = (float*) malloc(sizeof(float) * outputSize);
+    
+    for (int i = 0; i < outputSize; i++) {
+        // Simplified gradient computation (cross-entropy loss derivative)
+        outputGradients[i] = output[i];
+    }
+    outputGradients[(int)targetLabel] -= 1.0;
+
+    // Backpropagate gradients through layers
+    float* currentGradients = outputGradients;
+    for (int layer = NUM_HIDDEN_LAYERS - 1; layer >= 0; layer--) {
+        int currentLayerSize = (layer == NUM_HIDDEN_LAYERS - 1) ? outputSize : HIDDEN_SIZE;
+        int prevLayerSize = (layer == 0) ? inputSize : HIDDEN_SIZE;
+        
+        // Compute weight gradients
+        for (int i = 0; i < prevLayerSize; i++) {
+            for (int j = 0; j < currentLayerSize; j++) {
+                float activationDerivative = activations[layer][j] * (1 - activations[layer][j]);
+                gradients[layer][i * currentLayerSize + j] = 
+                    currentGradients[j] * activationDerivative * activations[layer-1][i];
+            }
+        }
+        
+        // Prepare gradients for previous layer (if not input layer)
+        if (layer > 0) {
+            float* prevLayerGradients = (float*) malloc(sizeof(float) * prevLayerSize);
+            for (int i = 0; i < prevLayerSize; i++) {
+                prevLayerGradients[i] = 0;
+                for (int j = 0; j < currentLayerSize; j++) {
+                    prevLayerGradients[i] += currentGradients[j] * 
+                        hiddenWeights[layer][i * currentLayerSize + j];
+                }
+            }
+            free(currentGradients);
+            currentGradients = prevLayerGradients;
+        }
+    }
+    
+    free(currentGradients);
+}
+
+void updateWeights(float** hiddenWeights, float** gradients, float lr, int inputSize, int outputSize) {
+    for (int layer = 0; layer < NUM_HIDDEN_LAYERS; layer++) {
+        int currentInputSize = (layer == 0) ? inputSize : HIDDEN_SIZE;
+        int currentOutputSize = (layer == NUM_HIDDEN_LAYERS - 1) ? outputSize : HIDDEN_SIZE;
+        
+        for (int i = 0; i < currentInputSize; i++) {
+            for (int j = 0; j < currentOutputSize; j++) {
+                int weightIndex = i * currentOutputSize + j;
+                hiddenWeights[layer][weightIndex] -= lr * gradients[layer][weightIndex];
+            }
+        }
+    }
+}
+
+void train(float** dataset, float* labels, int epochSize, int sampleSize, 
+           int inputSize, int outputSize, float lr = 0.01f) {
+    float** hiddenWeights = (float**) malloc(NUM_HIDDEN_LAYERS * sizeof(float*));
+    float** activations = (float**) malloc(NUM_HIDDEN_LAYERS * sizeof(float*));
+
+    for (int i = 0; i < NUM_HIDDEN_LAYERS; i++) {
+        int prevSize = (i == 0) ? inputSize : HIDDEN_SIZE;
+        int currSize = (i == NUM_HIDDEN_LAYERS - 1) ? outputSize : HIDDEN_SIZE;
+        
+        hiddenWeights[i] = (float*) malloc(prevSize * currSize * sizeof(float));
+        activations[i] = (float*) malloc(currSize * sizeof(float));
+        
+        for (int j = 0; j < prevSize * currSize; j++) {
+            hiddenWeights[i][j] = (float)rand() / RAND_MAX - 0.5f;
+        }
+    }
+
+    // Training loop
+    for (int epoch = 0; epoch < epochSize; epoch++) {
+        float totalLoss = 0.0f;
+        
+        for (int sampleIdx = 0; sampleIdx < sampleSize; sampleIdx++) {
+            float* sample = dataset[sampleIdx];
+            float* output = (float*) malloc(outputSize * sizeof(float));
+            
+            forward(sample, inputSize, hiddenWeights, activations, output, outputSize);
+            
+            float loss = 0;
+            for (int i = 0; i < outputSize; i++) {
+                loss -= labels[sampleIdx] * log(output[i]) + 
+                        (1 - labels[sampleIdx]) * log(1 - output[i]);
+            }
+            totalLoss += loss;
+
+            float** gradients = (float**) malloc(NUM_HIDDEN_LAYERS * sizeof(float*));
+            for (int i = 0; i < NUM_HIDDEN_LAYERS; i++) {
+                int prevSize = (i == 0) ? inputSize : HIDDEN_SIZE;
+                int currSize = (i == NUM_HIDDEN_LAYERS - 1) ? outputSize : HIDDEN_SIZE;
+                gradients[i] = (float*) calloc(prevSize * currSize, sizeof(float));
+            }
+
+            backward(output, labels[sampleIdx], hiddenWeights, gradients, activations, outputSize, inputSize);
+
+            updateWeights(hiddenWeights, gradients, lr, inputSize, outputSize);
+
+            free(output);
+            for (int i = 0; i < NUM_HIDDEN_LAYERS; i++) {
+                free(gradients[i]);
+            }
+            free(gradients);
+        }
+
+        printf("Epoch %d, Loss: %.4f\n", epoch + 1, totalLoss / sampleSize);
+    }
+
+    // Memory cleanup
+    for (int i = 0; i < NUM_HIDDEN_LAYERS; i++) {
+        free(hiddenWeights[i]);
+        free(activations[i]);
+    }
+    free(hiddenWeights);
+    free(activations);
 }
 
 int main() {
     int train_image_count, train_label_count, test_image_count, test_label_count;
     int image_size;
-
     float* train_images = readImages(TRAIN_IMAGE, &train_image_count, &image_size);
     float* train_labels = readLabels(TRAIN_LABEL, &train_label_count);
-
     if (!train_images || !train_labels) {
         printf("Failed to load MNIST data.\n");
         return 1;
     }
 
-    const int hiddenSize = 128;
-    const int numHiddenLayers = 2;
     const int outputSize = 10;
-    const int epochs = 10;
-    const float learningRate = 0.01f;
-
-   
-
+    const int epochs = 100;
+    const float lr = 0.01f;
+    
+    // Convert labels to one-hot encoding
+    float* oneHotLabels = (float*) malloc(train_image_count * outputSize * sizeof(float));
+    for (int i = 0; i < train_image_count; i++) {
+        memset(oneHotLabels + i * outputSize, 0, outputSize * sizeof(float));
+        oneHotLabels[i * outputSize + (int)train_labels[i]] = 1.0f;
+    }
+    
+    // Prepare dataset as 2D array of pointers
+    float** dataset = (float**) malloc(train_image_count * sizeof(float*));
+    for (int i = 0; i < train_image_count; i++) {
+        dataset[i] = train_images + i * image_size;
+    }
+    
+    // Train the neural network
+    train(dataset, oneHotLabels, epochs, train_image_count, image_size, outputSize, lr);
+    
+    // Cleanup
+    free(dataset);
+    free(oneHotLabels);
+    free(train_images);
+    free(train_labels);
+    
     return 0;
 }
