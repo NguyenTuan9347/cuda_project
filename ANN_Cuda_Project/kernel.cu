@@ -8,6 +8,8 @@
 #include <math.h>
 
 #define TILE_k 32
+
+
 #define CHECK(call)\
 {\
     cudaError_t errorSync = call;\
@@ -162,9 +164,8 @@ int reverseInt(int i) {
 
 double* readLabels(const char* path, int* num_labels) {
     FILE* file = fopen(path, "rb");
-    printf("%s\n%s\n", "E:/Uni Documents/HCMUS_HK10/Parallel Programming/Final project real/fashion/train-images-idx1-ubyte", path);
     if (file == NULL) {
-        perror("Error opening label file");
+        perror("Error opening file");
         return nullptr;
     }
 
@@ -194,9 +195,8 @@ double* readLabels(const char* path, int* num_labels) {
 
 double* readImages(const char* path, int* num_images, int* image_size) {
     FILE* file = fopen(path, "rb");
-    printf("%s\n%s\n", "E:/Uni Documents/HCMUS_HK10/Parallel Programming/Final project real/fashion/train-images-idx3-ubyte", path);
     if (file == NULL) {
-        perror("Error opening image file");
+        perror("Error opening file");
         return nullptr;
     }
 
@@ -226,7 +226,7 @@ double* readImages(const char* path, int* num_images, int* image_size) {
         for (int j = 0; j < *image_size; ++j) {
             unsigned char temp = 0;
             fread(&temp, sizeof(temp), 1, file);
-            images[i * (*image_size) + j] = (double)temp;
+            images[i * (*image_size) + j] = (double)temp / 255.0;
 
         }
     }
@@ -239,7 +239,7 @@ double* readImages(const char* path, int* num_images, int* image_size) {
 void printMatrix(double* matrix, int rowSize, int colSize) {
     for (int i = 0; i < rowSize; i++) {
         for (int j = 0; j < colSize; j++) {
-            printf("%.2lf ", matrix[i * colSize + j]);
+            printf("%d ", matrix[i * colSize + j]);
         }
         printf("\n");
     }
@@ -263,23 +263,28 @@ void displayImg(const double* image, int rows, int cols) {
 
 
 // Compute softmax activation
-void softmax(double* input, int size) {
-    double max_val = input[0];
+void softmax(double* input, int sampleSize, int outputSize) {
+    for (int sampleIdx = 0; sampleIdx < sampleSize; sampleIdx++) {
+        int buffer = sampleIdx * outputSize;
 
-    for (int i = 1; i < size; i++) {
-        if (input[i] > max_val) {
-            max_val = input[i];
+        double max_val = input[buffer];
+        for (int i = 1; i < outputSize; i++) {
+            if (input[buffer + i] > max_val) {
+                max_val = input[buffer + i];
+            }
         }
-    }
 
-    double sum = 0.0;
-    for (int i = 0; i < size; i++) {
-        input[i] = exp(input[i] - max_val);
-        sum += input[i];
-    }
+        double sum = 0.0;
+        for (int i = 0; i < outputSize; i++) {
+            double tmp = exp(input[buffer + i] - max_val);
+            sum += tmp;
+        }
 
-    for (int i = 0; i < size; i++) {
-        input[i] /= sum;
+        for (int i = 0; i < outputSize; i++) {
+            double tmp = exp(input[buffer + i] - max_val);
+
+            input[buffer + i] = (tmp / sum);
+        }
     }
 }
 
@@ -367,7 +372,7 @@ void matrixMultiplication(double* A, int m, int n, double* B, int k, double* C, 
         cudaMemcpy(d_B, B, n * k * sizeof(double), cudaMemcpyHostToDevice);
 
         dim3 gridSize((k + blockSize.x - 1) / blockSize.x, (m + blockSize.y - 1) / blockSize.y);
-        matrixMultiKernel << <gridSize, blockSize >> > (d_A, d_B, d_C, m, n, k);
+        matrixMultiKernel <<<gridSize, blockSize >>> (d_A, d_B, d_C, m, n, k);
 
         cudaMemcpy(C, d_C, m * k * sizeof(double), cudaMemcpyDeviceToHost);
 
@@ -434,7 +439,8 @@ void elementWiseUnary(double* a, double* c, int rowSize, int colSize, double (*u
         for (int i = 0; i < rowSize; i++) {
             for (int j = 0; j < colSize; j++) {
                 int idx = i * colSize + j;
-                c[idx] = unary(a[idx]);            }
+                c[idx] = unary(a[idx]);            
+            }
         }
     }
 }
@@ -473,7 +479,7 @@ void forward(double* input, double** hiddenWeights, double** activations, double
 
     matrixMultiplication(currentInput, sampleSize, HIDDEN_SIZE, hiddenWeights[NUM_HIDDEN_LAYERS], outputSize, output, useDevice, blockSize);
 
-    softmax(output, outputSize);
+    softmax(output,sampleSize, outputSize);
 }
 
 
@@ -553,10 +559,7 @@ void backward(double* input, double* output, double* targetLabels, double** hidd
         free(activationsTransposed);
     }
     
-    for (int i = 0; i <= NUM_HIDDEN_LAYERS; i++) {
-        hiddenWeights[i] = hiddenWeights[i];
-    }
-       
+      
     // Update weights and bias
     for (int i = NUM_HIDDEN_LAYERS; i >= 0; i--) {
         int weightColSize = (i == NUM_HIDDEN_LAYERS) ? outputSize : HIDDEN_SIZE;
@@ -580,9 +583,8 @@ double calculateCrossEntropyLoss(double* output, double* trueLabels, int sampleS
         double sampleLoss = 0.0f;
         int label =(int)trueLabels[sampleIdx];
         for (int j = 0; j < numClasses; j++) {
-            if (label == j) {
-                sampleLoss -= log(output[sampleIdx * numClasses + j] + 1e-15f);
-            }
+            if(label == j)
+                sampleLoss -= log(output[numClasses * sampleSize + j] + 1e-15f);
         }
         totalLoss += sampleLoss;
     }
@@ -615,9 +617,10 @@ void train(double** dataset, double* labels, int epochSize, int sampleSize, int 
             double* output = allocMatrix(end, outputSize);
 
             forward(sample, hiddenWeights, activations, bias, output, outputSize, end);
-
+            double totalLoss = 0.0f;
             totalLoss += calculateCrossEntropyLoss(output, &labels[sampleTrueIdx], end, outputSize);
-            
+            printf("Epoch %d, Batch ID %d, Loss: %.4f\n", epoch + 1, sampleIdx + 1, totalLoss);
+
             backward(sample, output, &labels[sampleTrueIdx], hiddenWeights, activations, bias, end);
 
             for (int i = 0; i < NUM_HIDDEN_LAYERS; i++) {
@@ -627,7 +630,6 @@ void train(double** dataset, double* labels, int epochSize, int sampleSize, int 
             free(output);
             batchSize++;
         }
-        printf("Epoch %d, Loss: %.4f\n", epoch + 1, totalLoss / batchSize);
     }
 
     for (int i = 0; i <= NUM_HIDDEN_LAYERS; i++) {
@@ -649,14 +651,14 @@ int main() {
         return 1;
     }
 
-    const int epochs = 10;
+    const int epochs = 100;
 
     double** dataset = (double**)malloc(train_image_count * sizeof(double*));
     for (int i = 0; i < train_image_count; i++) {
         dataset[i] = train_images + i * image_size;
     }
 
-    train(dataset, train_labels, epochs, 1024, image_size, train_image_count);
+    train(dataset, train_labels, epochs, 128, image_size, train_image_count);
 
     free(dataset);
     free(train_images);
