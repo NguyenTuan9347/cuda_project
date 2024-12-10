@@ -512,8 +512,10 @@ double calculateCrossEntropyLoss(double* output, double* trueLabels, int sampleS
     double totalLoss = 0.0f;
     for (int sampleIdx = 0; sampleIdx < sampleSize; sampleIdx++) {
         double sampleLoss = 0.0f;
+        int label =(int)trueLabels[sampleIdx];
         for (int j = 0; j < numClasses; j++) {
-            sampleLoss -= trueLabels[sampleIdx] * log(output[numClasses * sampleSize + j] + 1e-15f);
+            if(label == j)
+                sampleLoss -= log(output[numClasses * sampleSize + j] + 1e-15f);
         }
         totalLoss += sampleLoss;
     }
