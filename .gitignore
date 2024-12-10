@@ -4,3 +4,4 @@
 *.o
 *.gz
 *.vs
+config.txt

@@ -7,20 +7,7 @@
 #include <cuda_runtime.h>
 #include <math.h>
 
-#define NUM_HIDDEN_LAYERS 3
 #define TILE_k 32
-#define MAX_IMAGESIZE 784  // 28x28 flattened size
-#define NUM_TRAIN 60000
-#define NUM_TEST 10000
-#define SIZE 784
-#define LR 0.01
-#define TRAIN_IMAGE "D:/gpu_project_course/fashion/train-images-idx3-ubyte"
-#define TRAIN_LABEL "D:/gpu_project_course/fashion/train-labels-idx1-ubyte"
-#define TEST_IMAGE "D:/gpu_project_course/fashion/t10k-images-idx3-ubyte"
-#define TEST_LABEL "D:/gpu_project_course/fashion/t10k-labels-idx1-ubyte"
-#define HIDDEN_SIZE 128
-#define OUTPUT_SIZE 10
-
 #define CHECK(call)\
 {\
     cudaError_t errorSync = call;\
@@ -39,6 +26,83 @@
                 cudaGetErrorString(errorASync));\
         exit(EXIT_FAILURE);\
     }\
+}
+
+// Global variables
+int NUM_HIDDEN_LAYERS = 3;
+int MAX_IMAGESIZE = 784;  // 28x28 flattened size
+int NUM_TRAIN = 60000;
+int NUM_TEST = 10000;
+int SIZE = 784;
+float LR = 0.01;
+char TRAIN_IMAGE[512] = "D:/gpu_project_course/fashion/train-images-idx3-ubyte";
+char TRAIN_LABEL[512] = "D:/gpu_project_course/fashion/train-labels-idx1-ubyte";
+char TEST_IMAGE[512] = "D:/gpu_project_course/fashion/t10k-images-idx3-ubyte";
+char TEST_LABEL[512] = "D:/gpu_project_course/fashion/t10k-labels-idx1-ubyte";
+int HIDDEN_SIZE = 128;
+int OUTPUT_SIZE = 10;
+
+void setConfigValue(const char* key, const char* value) {
+    if (strcmp(key, "NUM_HIDDEN_LAYERS") == 0) {
+        NUM_HIDDEN_LAYERS = atoi(value);
+    } else if (strcmp(key, "MAX_IMAGESIZE") == 0) {
+        MAX_IMAGESIZE = atoi(value);
+    } else if (strcmp(key, "NUM_TRAIN") == 0) {
+        NUM_TRAIN = atoi(value);
+    } else if (strcmp(key, "NUM_TEST") == 0) {
+        NUM_TEST = atoi(value);
+    } else if (strcmp(key, "SIZE") == 0) {
+        SIZE = atoi(value);
+    } else if (strcmp(key, "LR") == 0) {
+        LR = atof(value);
+    } else if (strcmp(key, "TRAIN_IMAGE") == 0) {
+        strncpy(TRAIN_IMAGE, value, sizeof(TRAIN_IMAGE));
+    } else if (strcmp(key, "TRAIN_LABEL") == 0) {
+        strncpy(TRAIN_LABEL, value, sizeof(TRAIN_LABEL));
+    } else if (strcmp(key, "TEST_IMAGE") == 0) {
+        strncpy(TEST_IMAGE, value, sizeof(TEST_IMAGE));
+    } else if (strcmp(key, "TEST_LABEL") == 0) {
+        strncpy(TEST_LABEL, value, sizeof(TEST_LABEL));
+    } else if (strcmp(key, "HIDDEN_SIZE") == 0) {
+        HIDDEN_SIZE = atoi(value);
+    } else if (strcmp(key, "OUTPUT_SIZE") == 0) {
+        OUTPUT_SIZE = atoi(value);
+    }
+}
+
+void loadConfig(const char* filename) {
+    FILE *file = fopen(filename, "r");
+    if (file == NULL) {
+        perror("Error opening configuration file");
+        return;
+    }
+
+    char line[512];  // Increase buffer size to accommodate longer lines with spaces
+    while (fgets(line, sizeof(line), file)) {
+        char key[128], value[384];  // Increase value size to handle longer paths
+
+        // Parse each line in the form of key = value, handling spaces in the value
+        if (sscanf(line, "%127[^=]=%383[^\n]", key, value) == 2) {
+            // Trim leading and trailing spaces from value
+            char *trimmed_value = value;
+
+            // Remove leading spaces
+            while (*trimmed_value == ' ') {
+                trimmed_value++;
+            }
+
+            // Remove trailing spaces
+            char *end = trimmed_value + strlen(trimmed_value) - 1;
+            while (end > trimmed_value && *end == ' ') {
+                *end = '\0';
+                end--;
+            }
+
+            setConfigValue(key, trimmed_value);
+        }
+    }
+
+    fclose(file);
 }
 
 // Allocate memory for a matrix
@@ -98,8 +162,9 @@ int reverseInt(int i) {
 
 double* readLabels(const char* path, int* num_labels) {
     FILE* file = fopen(path, "rb");
+    printf("%s\n%s\n", "E:/Uni Documents/HCMUS_HK10/Parallel Programming/Final project real/fashion/train-images-idx1-ubyte", path);
     if (file == NULL) {
-        perror("Error opening file");
+        perror("Error opening label file");
         return nullptr;
     }
 
@@ -129,8 +194,9 @@ double* readLabels(const char* path, int* num_labels) {
 
 double* readImages(const char* path, int* num_images, int* image_size) {
     FILE* file = fopen(path, "rb");
+    printf("%s\n%s\n", "E:/Uni Documents/HCMUS_HK10/Parallel Programming/Final project real/fashion/train-images-idx3-ubyte", path);
     if (file == NULL) {
-        perror("Error opening file");
+        perror("Error opening image file");
         return nullptr;
     }
 
@@ -173,7 +239,7 @@ double* readImages(const char* path, int* num_images, int* image_size) {
 void printMatrix(double* matrix, int rowSize, int colSize) {
     for (int i = 0; i < rowSize; i++) {
         for (int j = 0; j < colSize; j++) {
-            printf("%d ", matrix[i * colSize + j]);
+            printf("%.2lf ", matrix[i * colSize + j]);
         }
         printf("\n");
     }
@@ -512,11 +578,16 @@ double calculateCrossEntropyLoss(double* output, double* trueLabels, int sampleS
     double totalLoss = 0.0f;
     for (int sampleIdx = 0; sampleIdx < sampleSize; sampleIdx++) {
         double sampleLoss = 0.0f;
+        int label =(int) trueLabels[sampleIdx];
         for (int j = 0; j < numClasses; j++) {
-            sampleLoss -= trueLabels[sampleIdx] * log(output[numClasses * sampleSize + j] + 1e-15f);
+            if (label == j) {
+                sampleLoss -= log(output[sampleIdx * sampleSize + j] + 1e-15f);
+            }
         }
         totalLoss += sampleLoss;
     }
+    return totalLoss / sampleSize;
+
     return totalLoss / sampleSize;
 }
 
@@ -531,8 +602,8 @@ void train(double** dataset, double* labels, int epochSize, int sampleSize, int 
         bias[i] = initRandomMatrix(currSize,1, -0.5, 0.5);
         printf("At layer %d: (%d,%d)\n", i, prevSize, currSize);
     }
-
     for (int epoch = 0; epoch < epochSize; epoch++) {
+        printf("Epoch %d: \n", epoch);
         double totalLoss = 0.0f;
         int batchSize = 0;
         for (int sampleIdx = 0; sampleIdx * sampleSize < totalSize; sampleIdx++) {
@@ -571,30 +642,49 @@ void train(double** dataset, double* labels, int epochSize, int sampleSize, int 
 }
 
 int main() {
-    int train_image_count, train_label_count;
-    int image_size;
-    double* train_images = readImages(TRAIN_IMAGE, &train_image_count, &image_size);
-    double* train_labels = readLabels(TRAIN_LABEL, &train_label_count);
-    if (!train_images || !train_labels) {
-        printf("Failed to load Fashion MNIST data.\n");
-        return 1;
-    }
+    // loadConfig("config.txt");
+    // int train_image_count, train_label_count;
+    // int image_size;
+    // double* train_images = readImages(TRAIN_IMAGE, &train_image_count, &image_size);
+    // double* train_labels = readLabels(TRAIN_LABEL, &train_label_count);
+    // if (!train_images || !train_labels) {
+    //     printf("Failed to load Fashion MNIST data.\n");
+    //     return 1;
+    // }
 
-    const int epochs = 10;
+    // const int epochs = 10;
 
-    double** dataset = (double**)malloc(train_image_count * sizeof(double*));
-    for (int i = 0; i < train_image_count; i++) {
-        dataset[i] = train_images + i * image_size;
-    }
+    // double** dataset = (double**)malloc(train_image_count * sizeof(double*));
+    // for (int i = 0; i < train_image_count; i++) {
+    //     dataset[i] = train_images + i * image_size;
+    // }
 
-    train(dataset, train_labels, epochs, 1024, image_size, train_image_count);
+    // train(dataset, train_labels, epochs, 1024, image_size, train_image_count);
 
-    free(dataset);
-    free(train_images);
-    free(train_labels);
-   /* double* tmp = initRandomMatrix(4, 3, 5.0, 10.0);
-    double* reverse = transpose(tmp, 4, 3);
-    printMatrix(tmp, 4, 3);
-    printMatrix(reverse, 3, 4);*/
+    // free(dataset);
+    // free(train_images);
+    // free(train_labels);
+
+    // Test matrix multiplication
+    // double a[6] = {2, 3, 4, 5, 6, 7};
+    // double b[6] = {7, 8, 9, 10, 11, 12};
+    // double c[9];
+    // double real_c[9];
+    // matrixMultiplication(a, 3, 2, b, 3, c, false);
+    // matrixMultiplication(a, 3, 2, b, 3, real_c, false);
+    // printMatrix(c, 3, 3);
+    // printMatrix(real_c, 3, 3);
+
+    // Test loss function
+    double a[9] = {0.9, 0.1, 0.0, 0.1, 0.7, 0.2, 0.1, 0.4, 0.5};
+    double b[3] = {0, 1, 2};
+    printf("%.2lf", calculateCrossEntropyLoss(a, b, 3, 3));
+
+    // Test softmax
+    // double a[5] = {1.3, 5.1, 2.2, 0.7, 1.1};
+    // softmax(a, 5);
+    // for (int i = 0; i < 5; i++) {
+    //     printf("%.2lf ", a[i]);
+    // }
     return 0;
 }
