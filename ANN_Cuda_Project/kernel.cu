@@ -581,7 +581,7 @@ double calculateCrossEntropyLoss(double* output, double* trueLabels, int sampleS
         int label =(int)trueLabels[sampleIdx];
         for (int j = 0; j < numClasses; j++) {
             if (label == j) {
-                sampleLoss -= log(output[sampleIdx * sampleSize + j] + 1e-15f);
+                sampleLoss -= log(output[sampleIdx * numClasses + j] + 1e-15f);
             }
         }
         totalLoss += sampleLoss;
@@ -601,7 +601,6 @@ void train(double** dataset, double* labels, int epochSize, int sampleSize, int 
         printf("At layer %d: (%d,%d)\n", i, prevSize, currSize);
     }
     for (int epoch = 0; epoch < epochSize; epoch++) {
-        printf("Epoch %d: \n", epoch);
         double totalLoss = 0.0f;
         int batchSize = 0;
         for (int sampleIdx = 0; sampleIdx * sampleSize < totalSize; sampleIdx++) {
