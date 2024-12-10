@@ -578,19 +578,14 @@ double calculateCrossEntropyLoss(double* output, double* trueLabels, int sampleS
     double totalLoss = 0.0f;
     for (int sampleIdx = 0; sampleIdx < sampleSize; sampleIdx++) {
         double sampleLoss = 0.0f;
-        int label =(int) trueLabels[sampleIdx];
         int label =(int)trueLabels[sampleIdx];
         for (int j = 0; j < numClasses; j++) {
             if (label == j) {
                 sampleLoss -= log(output[sampleIdx * sampleSize + j] + 1e-15f);
             }
-            if(label == j)
-                sampleLoss -= log(output[numClasses * sampleSize + j] + 1e-15f);
         }
         totalLoss += sampleLoss;
     }
-    return totalLoss / sampleSize;
-
     return totalLoss / sampleSize;
 }
 
@@ -645,28 +640,28 @@ void train(double** dataset, double* labels, int epochSize, int sampleSize, int 
 }
 
 int main() {
-    // loadConfig("config.txt");
-    // int train_image_count, train_label_count;
-    // int image_size;
-    // double* train_images = readImages(TRAIN_IMAGE, &train_image_count, &image_size);
-    // double* train_labels = readLabels(TRAIN_LABEL, &train_label_count);
-    // if (!train_images || !train_labels) {
-    //     printf("Failed to load Fashion MNIST data.\n");
-    //     return 1;
-    // }
+    loadConfig("config.txt");
+    int train_image_count, train_label_count;
+    int image_size;
+    double* train_images = readImages(TRAIN_IMAGE, &train_image_count, &image_size);
+    double* train_labels = readLabels(TRAIN_LABEL, &train_label_count);
+    if (!train_images || !train_labels) {
+        printf("Failed to load Fashion MNIST data.\n");
+        return 1;
+    }
 
-    // const int epochs = 10;
+    const int epochs = 10;
 
-    // double** dataset = (double**)malloc(train_image_count * sizeof(double*));
-    // for (int i = 0; i < train_image_count; i++) {
-    //     dataset[i] = train_images + i * image_size;
-    // }
+    double** dataset = (double**)malloc(train_image_count * sizeof(double*));
+    for (int i = 0; i < train_image_count; i++) {
+        dataset[i] = train_images + i * image_size;
+    }
 
-    // train(dataset, train_labels, epochs, 1024, image_size, train_image_count);
+    train(dataset, train_labels, epochs, 1024, image_size, train_image_count);
 
-    // free(dataset);
-    // free(train_images);
-    // free(train_labels);
+    free(dataset);
+    free(train_images);
+    free(train_labels);
 
     // Test matrix multiplication
     // double a[6] = {2, 3, 4, 5, 6, 7};
@@ -679,9 +674,9 @@ int main() {
     // printMatrix(real_c, 3, 3);
 
     // Test loss function
-    double a[9] = {0.9, 0.1, 0.0, 0.1, 0.7, 0.2, 0.1, 0.4, 0.5};
-    double b[3] = {0, 1, 2};
-    printf("%.2lf", calculateCrossEntropyLoss(a, b, 3, 3));
+    // double a[9] = {0.9, 0.1, 0.0, 0.1, 0.7, 0.2, 0.1, 0.4, 0.5};
+    // double b[3] = {0, 1, 2};
+    // printf("%.2lf", calculateCrossEntropyLoss(a, b, 3, 3));
 
     // Test softmax
     // double a[5] = {1.3, 5.1, 2.2, 0.7, 1.1};
