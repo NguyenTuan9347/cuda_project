@@ -1,7 +1,18 @@
 ﻿  Compiling CUDA source file kernel.cu...
   
   D:\gpu_project_course\ANN_Cuda_Project>"C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.6\bin\nvcc.exe" -gencode=arch=compute_52,code=\"sm_52,compute_52\" --use-local-env -ccbin "C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.41.34120\bin\HostX64\x64" -x cu   -I"C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.6\include" -I"C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.6\include"  -G   --keep-dir ANN_Cuda_Project\x64\Debug  -maxrregcount=0   --machine 64 --compile -cudart static  -g  -DWIN32 -DWIN64 -D_DEBUG -D_CONSOLE -D_MBCS -Xcompiler "/EHsc /W3 /nologo /Od /FS /Zi /RTC1 /MDd " -Xcompiler "/FdANN_Cuda_Project\x64\Debug\vc143.pdb" -o D:\gpu_project_course\ANN_Cuda_Project\ANN_Cuda_Project\x64\Debug\kernel.cu.obj "D:\gpu_project_course\ANN_Cuda_Project\kernel.cu" 
+D:\gpu_project_course\ANN_Cuda_Project\kernel.cu(606): warning #177-D: variable "totalLoss" was declared but never referenced
+            double totalLoss = 0.0f;
+                   ^
+  
+  Remark: The warnings can be suppressed with "-diag-suppress <warning-number>"
+  
   kernel.cu
-  tmpxft_000074b8_00000000-7_kernel.cudafe1.cpp
-D:\gpu_project_course\ANN_Cuda_Project\kernel.cu(232): warning C4244: 'argument': conversion from 'double' to 'float', possible loss of data
+  tmpxft_0000439c_00000000-7_kernel.cudafe1.cpp
+D:\gpu_project_course\ANN_Cuda_Project\kernel.cu(39): warning C4305: 'initializing': truncation from 'double' to 'float'
+D:\gpu_project_course\ANN_Cuda_Project\kernel.cu(59): warning C4244: '=': conversion from 'double' to 'float', possible loss of data
+D:\gpu_project_course\ANN_Cuda_Project\kernel.cu(242): warning C4477: 'printf' : format string '%d' requires an argument of type 'int', but variadic argument 1 has type 'double'
+D:\gpu_project_course\ANN_Cuda_Project\kernel.cu(298): warning C4244: 'argument': conversion from 'double' to 'float', possible loss of data
+     Creating library D:\gpu_project_course\ANN_Cuda_Project\x64\Debug\ANN_Cuda_Project.lib and object D:\gpu_project_course\ANN_Cuda_Project\x64\Debug\ANN_Cuda_Project.exp
+LINK : warning LNK4098: defaultlib 'LIBCMT' conflicts with use of other libs; use /NODEFAULTLIB:library
   ANN_Cuda_Project.vcxproj -> D:\gpu_project_course\ANN_Cuda_Project\x64\Debug\ANN_Cuda_Project.exe
