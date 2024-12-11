@@ -36,7 +36,7 @@ int MAX_IMAGESIZE = 784;  // 28x28 flattened size
 int NUM_TRAIN = 60000;
 int NUM_TEST = 10000;
 int SIZE = 784;
-float LR = 0.01;
+double LR = 0.01;
 char TRAIN_IMAGE[512] = "D:/gpu_project_course/fashion/train-images-idx3-ubyte";
 char TRAIN_LABEL[512] = "D:/gpu_project_course/fashion/train-labels-idx1-ubyte";
 char TEST_IMAGE[512] = "D:/gpu_project_course/fashion/t10k-images-idx3-ubyte";
@@ -460,7 +460,8 @@ double addition(double& a, double& b) {
     return a + b;
 }
 
-void forward(double* input, double** hiddenWeights, double** activations, double** bias, double* output, int outputSize, int sampleSize, int featureSize = 728, bool useDevice = false, dim3 blockSize = dim3(1)) {
+void forward(double* input, double** hiddenWeights, double** activations, double** bias, double* output, 
+        int outputSize, int sampleSize, bool useDevice = false, dim3 blockSize = dim3(1), int featureSize = 728) {
     double* currentInput = input;
     int currentInputSize = featureSize;
 
@@ -487,7 +488,8 @@ double updateWeight(double& org, double& grad) {
     return org - LR * grad;
 }
 
-void backward(double* input, double* output, double* targetLabels, double** hiddenWeights, double** activations, double** bias, int sampleSize, int featureSize = 728, int outputSize = OUTPUT_SIZE, bool useDivice=false) {
+void backward(double* input, double* output, double* targetLabels, double** hiddenWeights, double** activations, 
+        double** bias, int sampleSize, bool useDevice = false, dim3 blockSize = dim3(1), int featureSize = 728, int outputSize = OUTPUT_SIZE) {
     double* gradOutput = (double*)malloc(sampleSize * outputSize * sizeof(double));
     double** gradWeights = (double**)malloc((NUM_HIDDEN_LAYERS+1) * sizeof(double*));
     double** gradBias = (double**)malloc((NUM_HIDDEN_LAYERS + 1) * sizeof(double*));
@@ -506,7 +508,7 @@ void backward(double* input, double* output, double* targetLabels, double** hidd
 
     double* outputTranposed = transpose(output, sampleSize, outputSize);
 
-    matrixMultiplication(outputTranposed, outputSize, sampleSize, gradientToLoss, outputSize, gradWeights[NUM_HIDDEN_LAYERS]);
+    matrixMultiplication(outputTranposed, outputSize, sampleSize, gradientToLoss, outputSize, gradWeights[NUM_HIDDEN_LAYERS],useDevice,blockSize);
 
     computeGradientForBias(gradientToLoss, gradBias[NUM_HIDDEN_LAYERS], sampleSize, outputSize);
     
@@ -516,7 +518,7 @@ void backward(double* input, double* output, double* targetLabels, double** hidd
     double* derivativeOfActivation = allocMatrix(sampleSize, activationColSize);
     double* previousGradient = allocMatrix(sampleSize, activationColSize);
 
-    matrixMultiplication(gradientToLoss, sampleSize, outputSize, weightsTransposed, activationColSize, previousGradient);
+    matrixMultiplication(gradientToLoss, sampleSize, outputSize, weightsTransposed, activationColSize, previousGradient, useDevice, blockSize);
 
     elementWiseUnary(activations[NUM_HIDDEN_LAYERS - 1], derivativeOfActivation, sampleSize, activationColSize, computeDerivativeHiddenLayer);
     elementWiseBinary(previousGradient, derivativeOfActivation, previousGradient, sampleSize, activationColSize, multiply);
@@ -542,7 +544,7 @@ void backward(double* input, double* output, double* targetLabels, double** hidd
             derivativeOfActivation = allocMatrix(sampleSize, activationColSize);
             previousGradient = allocMatrix(sampleSize, activationColSize);
 
-            matrixMultiplication(gradientToLoss, sampleSize, weightColSize, weightsTransposed, activationColSize, previousGradient);
+            matrixMultiplication(gradientToLoss, sampleSize, weightColSize, weightsTransposed, activationColSize, previousGradient, useDevice, blockSize);
 
             elementWiseUnary(activations[i - 1], derivativeOfActivation, sampleSize, activationColSize, computeDerivativeHiddenLayer);
             elementWiseBinary(previousGradient, derivativeOfActivation, previousGradient, sampleSize, activationColSize, multiply);
@@ -602,8 +604,9 @@ void train(double** dataset, double* labels, int epochSize, int sampleSize, int 
         bias[i] = initRandomMatrix(currSize,1, -0.5, 0.5);
         printf("At layer %d: (%d,%d)\n", i, prevSize, currSize);
     }
+    double totalLoss = 0.0;
+
     for (int epoch = 0; epoch < epochSize; epoch++) {
-        double totalLoss = 0.0f;
         int batchSize = 0;
         for (int sampleIdx = 0; sampleIdx * sampleSize < totalSize; sampleIdx++) {
             int sampleTrueIdx = sampleIdx * sampleSize;
@@ -615,13 +618,12 @@ void train(double** dataset, double* labels, int epochSize, int sampleSize, int 
             }
 
             double* output = allocMatrix(end, outputSize);
-
-            forward(sample, hiddenWeights, activations, bias, output, outputSize, end);
-            double totalLoss = 0.0f;
+            dim3 blockSize(256);
+            forward(sample, hiddenWeights, activations, bias, output, outputSize, end, true, blockSize);
+            
             totalLoss += calculateCrossEntropyLoss(output, &labels[sampleTrueIdx], end, outputSize);
-            printf("Epoch %d, Batch ID %d, Loss: %.4f\n", epoch + 1, sampleIdx + 1, totalLoss);
 
-            backward(sample, output, &labels[sampleTrueIdx], hiddenWeights, activations, bias, end);
+            backward(sample, output, &labels[sampleTrueIdx], hiddenWeights, activations, bias, end, true, blockSize);
 
             for (int i = 0; i < NUM_HIDDEN_LAYERS; i++) {
                 free(activations[i]);
@@ -630,6 +632,7 @@ void train(double** dataset, double* labels, int epochSize, int sampleSize, int 
             free(output);
             batchSize++;
         }
+        printf("Epoch %d, Loss: %.4f\n", epoch + 1, totalLoss / sampleSize);
     }
 
     for (int i = 0; i <= NUM_HIDDEN_LAYERS; i++) {
@@ -641,7 +644,7 @@ void train(double** dataset, double* labels, int epochSize, int sampleSize, int 
 }
 
 int main() {
-    loadConfig("config.txt");
+    //loadConfig("config.txt");
     int train_image_count, train_label_count;
     int image_size;
     double* train_images = readImages(TRAIN_IMAGE, &train_image_count, &image_size);
@@ -658,7 +661,7 @@ int main() {
         dataset[i] = train_images + i * image_size;
     }
 
-    train(dataset, train_labels, epochs, 128, image_size, train_image_count);
+    train(dataset, train_labels, epochs, 5000, image_size, train_image_count);
 
     free(dataset);
     free(train_images);
