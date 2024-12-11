@@ -583,14 +583,41 @@ double calculateCrossEntropyLoss(double* output, double* trueLabels, int sampleS
     double totalLoss = 0.0f;
     for (int sampleIdx = 0; sampleIdx < sampleSize; sampleIdx++) {
         double sampleLoss = 0.0f;
-        int label =(int)trueLabels[sampleIdx];
+        int label = (int)trueLabels[sampleIdx];
         for (int j = 0; j < numClasses; j++) {
             if(label == j)
-                sampleLoss -= log(output[numClasses * sampleSize + j] + 1e-15f);
+                sampleLoss -= log(output[numClasses * sampleIdx + j] + 1e-15f);
         }
         totalLoss += sampleLoss;
     }
     return totalLoss / sampleSize;
+}
+
+double calculateAccuracy(double* output, double* trueLabels, int sampleSize, int numClasses) {
+    int correct = 0;
+    for (int sampleIdx = 0; sampleIdx < sampleSize; sampleIdx++) {
+        int truth = (int)trueLabels[sampleIdx];
+        double maxPred = 0.0f;
+        int label = 0;
+        for (int j = 0; j < numClasses; j++) {
+            double pred = output[numClasses * sampleIdx + j];
+            if (pred > maxPred) {
+                maxPred = pred;
+                label = j;
+            }
+        }
+        
+        // DEBUG print
+        // printf("\nLabel: %d - Truth: %d - Prob: %.2f\n", label, truth, maxPred);
+        // for (int i = 0; i < numClasses; i++) {
+        //     printf("%.2lf ", output[numClasses * sampleIdx + i]);
+        // }
+        // _sleep(50);
+        if (label == truth) {
+            correct += 1;
+        }
+    }
+    return (correct * 1.0) / sampleSize;
 }
 
 void train(double** dataset, double* labels, int epochSize, int sampleSize, int featureSize, int totalSize, int outputSize = 10) {
@@ -621,7 +648,10 @@ void train(double** dataset, double* labels, int epochSize, int sampleSize, int 
             dim3 blockSize(256);
             forward(sample, hiddenWeights, activations, bias, output, outputSize, end, true, blockSize);
             
-            totalLoss += calculateCrossEntropyLoss(output, &labels[sampleTrueIdx], end, outputSize);
+            double loss = calculateCrossEntropyLoss(output, &labels[sampleTrueIdx], end, outputSize);
+            // Per batch accuracy (not total)
+            double accuracy = calculateAccuracy(output, &labels[sampleTrueIdx], end, outputSize);
+            printf("Epoch %d, Batch ID %d, Loss: %.4f, Acc: %.4f\n", epoch + 1, sampleIdx + 1, loss, accuracy);
 
             backward(sample, output, &labels[sampleTrueIdx], hiddenWeights, activations, bias, end, true, blockSize);
 
@@ -632,7 +662,6 @@ void train(double** dataset, double* labels, int epochSize, int sampleSize, int 
             free(output);
             batchSize++;
         }
-        printf("Epoch %d, Loss: %.4f\n", epoch + 1, totalLoss / sampleSize);
     }
 
     for (int i = 0; i <= NUM_HIDDEN_LAYERS; i++) {
@@ -678,9 +707,9 @@ int main() {
     // printMatrix(real_c, 3, 3);
 
     // Test loss function
-    // double a[9] = {0.9, 0.1, 0.0, 0.1, 0.7, 0.2, 0.1, 0.4, 0.5};
-    // double b[3] = {0, 1, 2};
-    // printf("%.2lf", calculateCrossEntropyLoss(a, b, 3, 3));
+    // double a[20] = {0.10, 0.09, 0.11, 0.09, 0.10, 0.10, 0.10, 0.10, 0.11, 0.10, 0.09, 0.11, 0.09, 0.10, 0.10, 0.10, 0.10, 0.11};
+    // double b[2] = {0, 2};
+    // printf("%.2lf", calculateCrossEntropyLoss(a, b, 2, 10));
 
     // Test softmax
     // double a[5] = {1.3, 5.1, 2.2, 0.7, 1.1};
@@ -688,5 +717,11 @@ int main() {
     // for (int i = 0; i < 5; i++) {
     //     printf("%.2lf ", a[i]);
     // }
+
+    // Test accuracy
+    // double a[20] = {0.10, 0.09, 0.11, 0.09, 0.10, 0.10, 0.10, 0.10, 0.11, 0.10, 
+    //                 0.10, 0.09, 0.11, 0.09, 0.10, 0.10, 0.10, 0.10, 0.11, 0.10};
+    // double b[2] = {0, 2};
+    // printf("%.2lf", calculateAccuracy(a, b, 2, 10));
     return 0;
 }
