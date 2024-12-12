@@ -1,6 +1,21 @@
 ﻿  Compiling CUDA source file kernel.cu...
   
   D:\gpu_project_course\ANN_Cuda_Project>"C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.6\bin\nvcc.exe" -gencode=arch=compute_52,code=\"sm_52,compute_52\" --use-local-env -ccbin "C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.41.34120\bin\HostX64\x64" -x cu   -I"C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.6\include" -I"C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.6\include"  -G   --keep-dir ANN_Cuda_Project\x64\Debug  -maxrregcount=0   --machine 64 --compile -cudart static  -g  -DWIN32 -DWIN64 -D_DEBUG -D_CONSOLE -D_MBCS -Xcompiler "/EHsc /W3 /nologo /Od /FS /Zi /RTC1 /MDd " -Xcompiler "/FdANN_Cuda_Project\x64\Debug\vc143.pdb" -o D:\gpu_project_course\ANN_Cuda_Project\ANN_Cuda_Project\x64\Debug\kernel.cu.obj "D:\gpu_project_course\ANN_Cuda_Project\kernel.cu" 
+D:\gpu_project_course\ANN_Cuda_Project\kernel.cu(411): warning #177-D: variable "tmp" was declared but never referenced
+                float tmp = image[r * cols + c];
+                      ^
+  
+  Remark: The warnings can be suppressed with "-diag-suppress <warning-number>"
+  
   kernel.cu
-  tmpxft_000062b4_00000000-7_kernel.cudafe1.cpp
+  tmpxft_00000b8c_00000000-7_kernel.cudafe1.cpp
+D:\gpu_project_course\ANN_Cuda_Project\kernel.cu(40): warning C4305: 'initializing': truncation from 'double' to 'float'
+D:\gpu_project_course\ANN_Cuda_Project\kernel.cu(62): warning C4244: '=': conversion from 'double' to 'float', possible loss of data
+D:\gpu_project_course\ANN_Cuda_Project\kernel.cu(223): warning C4477: 'fscanf' : format string '%lf' requires an argument of type 'double *', but variadic argument 1 has type 'float *'
+  D:\gpu_project_course\ANN_Cuda_Project\kernel.cu(223): note: consider using '%f' in the format string
+D:\gpu_project_course\ANN_Cuda_Project\kernel.cu(234): warning C4477: 'fscanf' : format string '%lf' requires an argument of type 'double *', but variadic argument 1 has type 'float *'
+  D:\gpu_project_course\ANN_Cuda_Project\kernel.cu(234): note: consider using '%f' in the format string
+D:\gpu_project_course\ANN_Cuda_Project\kernel.cu(607): warning C4244: 'return': conversion from 'double' to 'float', possible loss of data
+D:\gpu_project_course\ANN_Cuda_Project\kernel.cu(752): warning C4244: '-=': conversion from 'double' to 'float', possible loss of data
+D:\gpu_project_course\ANN_Cuda_Project\kernel.cu(783): warning C4244: 'return': conversion from 'double' to 'float', possible loss of data
   ANN_Cuda_Project.vcxproj -> D:\gpu_project_course\ANN_Cuda_Project\x64\Debug\ANN_Cuda_Project.exe

@@ -48,12 +48,22 @@ b2 = np.zeros((d2, 1))
 Y = convert_labels(y, C)
 N = X.shape[1]
 eta = 1 # learning rate
+print(f'X shape is{X.shape}')
+print(f'W1 shape is{W1.shape}')
+print(f'b1 shape is{b1.shape}')
+print(f'W2 shape is{W2.shape}')
+print(f'b2 shape is{b2.shape}')
+
 for i in range(10000):
     ## Feedforward
     Z1 = np.dot(W1.T, X) + b1
     A1 = np.maximum(Z1, 0)
     Z2 = np.dot(W2.T, A1) + b2
     Yhat = softmax(Z2)
+    print(f'Z1 shape is{Z1.shape}')
+    print(f'A1 shape is{A1.shape}')
+    print(f'Z2 shape is{Z2.shape}')
+    print(f'Yhat shape is{Yhat.shape}')
 
     # print loss after each 1000 iterations
     if i %1000 == 0:
@@ -69,9 +79,17 @@ for i in range(10000):
     E1[Z1 <= 0] = 0 # gradient of ReLU
     dW1 = np.dot(X, E1.T)
     db1 = np.sum(E1, axis = 1, keepdims = True)
+    print(f'E2 shape is{E2.shape}')
+    print(f'dW2 shape is{dW2.shape}')
+    print(f'db2 shape is{db2.shape}')
+    
+    print(f'E1 shape is{E1.shape}')
+    print(f'dW1 shape is{dW1.shape}')
+    print(f'db1 shape is{db1.shape}')
 
     # Gradient Descent update
     W1 += -eta*dW1
     b1 += -eta*db1
     W2 += -eta*dW2
     b2 += -eta*db2
+    break

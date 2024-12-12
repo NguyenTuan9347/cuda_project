@@ -37,7 +37,7 @@ int MAX_IMAGESIZE = 784;  // 28x28 flattened size
 int NUM_TRAIN = 60000;
 int NUM_TEST = 10000;
 int SIZE = 784;
-double LR = 0.1;
+float LR = 0.1;
 char TRAIN_IMAGE[512] = "D:/gpu_project_course/fashion/train-images-idx3-ubyte";
 char TRAIN_LABEL[512] = "D:/gpu_project_course/fashion/train-labels-idx1-ubyte";
 char TEST_IMAGE[512] = "D:/gpu_project_course/fashion/t10k-images-idx3-ubyte";
@@ -45,7 +45,7 @@ char TEST_LABEL[512] = "D:/gpu_project_course/fashion/t10k-labels-idx1-ubyte";
 int HIDDEN_SIZE = 128;
 int OUTPUT_SIZE = 10;
 char BEST_CHECKPOINT[512] = "None";
-double BEST_ACCURACY = 0.0f;
+float BEST_ACCURACY = 0.0f;
 
 void setConfigValue(const char* key, const char* value) {
     if (strcmp(key, "NUM_HIDDEN_LAYERS") == 0) {
@@ -165,7 +165,7 @@ void modifyConfig(const char* filename, const char* key, const char* newValue) {
 }
 
 // Write weights & biases to file
-void saveWANDB(double** hiddenWeights, double** bias, int featureSize, int outputSize, const char* filepath) {
+void saveWANDB(float** hiddenWeights, float** bias, int featureSize, int outputSize, const char* filepath) {
     FILE *file = fopen(filepath, "w");
     
     if (file == NULL) {
@@ -193,7 +193,7 @@ void saveWANDB(double** hiddenWeights, double** bias, int featureSize, int outpu
 }
 
 // Load weights & biases for testing
-void loadWANDB(double** hiddenWeights, double** bias, int featureSize, int outputSize, const char* filepath = nullptr) {
+void loadWANDB(float** hiddenWeights, float** bias, int featureSize, int outputSize, const char* filepath = nullptr) {
     FILE* file;
 
     // Auto-load best model
@@ -219,7 +219,7 @@ void loadWANDB(double** hiddenWeights, double** bias, int featureSize, int outpu
         int prevSize = (i == 0) ? featureSize : HIDDEN_SIZE;
         int currSize = (i == NUM_HIDDEN_LAYERS) ? OUTPUT_SIZE : HIDDEN_SIZE;
         for (int j = 0; j < prevSize * currSize; j++) {
-            double tmp = 0.0f;
+            float tmp = 0.0f;
             fscanf(file, "%lf", &tmp);
             hiddenWeights[i][j] = tmp;
         }
@@ -230,7 +230,7 @@ void loadWANDB(double** hiddenWeights, double** bias, int featureSize, int outpu
     for (int i = 0; i <= NUM_HIDDEN_LAYERS; i++) {
         int currSize = (i == NUM_HIDDEN_LAYERS) ? OUTPUT_SIZE : HIDDEN_SIZE;
         for (int j = 0; j < currSize; j++) {
-            double tmp = 0.0f;
+            float tmp = 0.0f;
             fscanf(file, "%lf", &tmp);
             bias[i][j] = tmp;
         }
@@ -239,37 +239,55 @@ void loadWANDB(double** hiddenWeights, double** bias, int featureSize, int outpu
     fclose(file);
 }
 
-// Allocate memory for a matrix
-double* allocMatrix(int rowSize, int colSize = 1) {
-    return (double*)malloc(rowSize * colSize * sizeof(double));
+float* allocMatrix(int rowSize, int colSize = 1) {
+    return (float*)malloc(rowSize * colSize * sizeof(float));
 }
 
-// Free allocated memory
-void freeMatrix(double* matrix) {
+void freeMatrix(float* matrix) {
     if (matrix) {
         free(matrix);
     }
 }
 
-// Initialize a random matrix
-double* initRandomMatrix(int rowSize, int colSize = 1, double lower = 0.0, double upper = 1.0) {
+float* initRandomMatrix(int rowSize, int colSize = 1, float lower = 0.0, float upper = 1.0) {
     int size = rowSize * colSize;
-    double* res = allocMatrix(rowSize, colSize);
+    float* res = allocMatrix(rowSize, colSize);
     for (int i = 0; i < size; i++) {
-        res[i] = lower + static_cast<double>(rand()) / (static_cast<double>(RAND_MAX / (upper - lower)));
+        res[i] = lower + static_cast<float>(rand()) / (static_cast<float>(RAND_MAX / (upper - lower)));
+    }
+    return res;
+}
+
+float* initHeMatrix(int rowSize, int colSize = 1) {
+    int size = rowSize * colSize;
+    float* res = allocMatrix(rowSize, colSize);
+
+    float limit = sqrt(6.0f / rowSize); 
+
+    for (int i = 0; i < size; i++) {
+        res[i] = -limit + static_cast<float>(rand()) / (static_cast<float>(RAND_MAX) / (2 * limit));
+    }
+    return res;
+}
+
+float* initFilledMatrix(int rowSize, int colSize = 1, float val=0.0) {
+    int size = rowSize * colSize;
+    float* res = allocMatrix(rowSize, colSize);
+    for (int i = 0; i < size; i++) {
+        res[i] = val;
     }
     return res;
 }
 
 // Copy values from one matrix to another
-void copyMatrix(double* dest, double* src, int size) {
+void copyMatrix(float* dest, float* src, int size) {
     for (int i = 0; i < size; i++) {
         dest[i] = src[i];
     }
 }
 
 // Initialize weights & biases
-bool initWANDB(double** hiddenWeights, double** bias, int featureSize, int outputSize, bool test) {
+bool initWANDB(float** hiddenWeights, float** bias, int featureSize, int outputSize, bool test) {
     if (test) {
         if (strcmp(BEST_CHECKPOINT, "None") != 0) {
             loadWANDB(hiddenWeights, bias, featureSize, outputSize, BEST_CHECKPOINT);
@@ -284,8 +302,8 @@ bool initWANDB(double** hiddenWeights, double** bias, int featureSize, int outpu
             int prevSize = (i == 0) ? featureSize : HIDDEN_SIZE;
             int currSize = (i == NUM_HIDDEN_LAYERS) ? outputSize : HIDDEN_SIZE;
 
-            hiddenWeights[i] = initRandomMatrix(prevSize, currSize, -0.5, 0.5);
-            bias[i] = initRandomMatrix(currSize, 1, -0.5, 0.5);
+            hiddenWeights[i] = initHeMatrix(prevSize, currSize);
+            bias[i] = initFilledMatrix(currSize, 1,0.0);
             printf("Layer %d initialized: (%d, %d)\n", i, prevSize, currSize);
         }
         return true;
@@ -318,7 +336,7 @@ int reverseInt(int i) {
     return ((int)c1 << 24) + ((int)c2 << 16) + ((int)c3 << 8) + c4;
 }
 
-double* readLabels(const char* path, int* num_labels) {
+float* readLabels(const char* path, int* num_labels) {
     FILE* file = fopen(path, "rb");
     if (file == NULL) {
         perror("Error opening file");
@@ -338,18 +356,64 @@ double* readLabels(const char* path, int* num_labels) {
         return nullptr;
     }
 
-    double* labels = (double*)malloc((*num_labels) * sizeof(double));
+    float* labels = (float*)malloc((*num_labels) * sizeof(float));
     for (int i = 0; i < *num_labels; ++i) {
         unsigned char temp = 0;
         fread(&temp, sizeof(temp), 1, file);
-        labels[i] = (double)temp;
+        labels[i] = (float)temp;
     }
 
     fclose(file);
     return labels;
 }
 
-double* readImages(const char* path, int* num_images, int* image_size) {
+
+
+void printMatrix(float* matrix, int rowSize, int colSize) {
+    for (int i = 0; i < rowSize; i++) {
+        for (int j = 0; j < colSize; j++) {
+            printf("%.2f ", matrix[i * colSize + j]);
+        }
+        printf("\n");
+    }
+    printf("\n");
+}
+
+float calChange(float* a, float* b, int rowSize, int colSize, float (*binary)(float& a, float& b)) {
+    float sum = 0.0;
+    for (int i = 0; i < rowSize; i++) {
+        for (int j = 0; j < colSize; j++) {
+            int idx = i * colSize + j;
+            sum += binary(a[idx], b[idx]);
+        }
+        
+    }
+    return sum;
+}
+
+void displayImg(const float* image, int rows, int cols) {
+    for (int r = 0; r < rows; ++r) {
+        for (int c = 0; c < cols; ++c) {
+            if (image[r * cols + c] > 0.0f) {
+                printf("* ");
+            }
+            else {
+                printf("  ");
+            }
+        }
+        printf("\n");
+    }
+}
+
+void displayBlank(const float* image, int rows, int cols) {
+    for (int r = 0; r < rows; ++r) {
+        for (int c = 0; c < cols; ++c) {
+            float tmp = image[r * cols + c];
+        };
+    }
+}
+
+float** readImages(const char* path, int* num_images, int* image_size, int batchSize) {
     FILE* file = fopen(path, "rb");
     if (file == NULL) {
         perror("Error opening file");
@@ -376,78 +440,43 @@ double* readImages(const char* path, int* num_images, int* image_size) {
     }
 
     *image_size = n_rows * n_cols;
-    double* images = (double*)malloc((*num_images) * (*image_size) * sizeof(double));
+    int numBatch = (*num_images - 1) / batchSize + 1;
+    float** images = (float**)malloc(numBatch * sizeof(float*));
+    for (int batchIdx = 0; batchIdx < numBatch; batchIdx++) {
+        int end = ((batchIdx + batchSize) > *num_images) ? (*num_images - batchIdx) : batchSize;
 
-    for (int i = 0; i < *num_images; ++i) {
-        for (int j = 0; j < *image_size; ++j) {
-            unsigned char temp = 0;
-            fread(&temp, sizeof(temp), 1, file);
-            images[i * (*image_size) + j] = (double)temp / 255.0;
-
+        images[batchIdx] = (float*)malloc((*image_size) * end * sizeof(float));
+        for (int i = 0; i < end; i++) {
+            for (int j = 0; j < *image_size; ++j) {
+                unsigned char temp = 0;
+                fread(&temp, sizeof(temp), 1, file);
+                images[batchIdx][i * (*image_size) + j] = (float)temp;
+            }
         }
     }
+    
 
     fclose(file);
     return images;
 }
 
+void softmax(float* input, float* output, int batchSize, int outputSize) {
+    for (int batchIdx = 0; batchIdx < batchSize; batchIdx++) {
+        int buffer = batchIdx * outputSize;
 
-void printMatrix(double* matrix, int rowSize, int colSize) {
-    for (int i = 0; i < rowSize; i++) {
-        for (int j = 0; j < colSize; j++) {
-            printf("%.2f ", matrix[i * colSize + j]);
-        }
-        printf("\n");
-    }
-    printf("\n");
-}
-
-double calChange(double* a, double* b, int rowSize, int colSize, double (*binary)(double& a, double& b)) {
-    double sum = 0.0;
-    for (int i = 0; i < rowSize; i++) {
-        for (int j = 0; j < colSize; j++) {
-            int idx = i * colSize + j;
-            sum += binary(a[idx], b[idx]);
-        }
-        
-    }
-    return sum;
-}
-
-void displayImg(const double* image, int rows, int cols) {
-    for (int r = 0; r < rows; ++r) {
-        for (int c = 0; c < cols; ++c) {
-            if (image[r * cols + c] > 0.0f) {
-                printf("* ");
-            }
-            else {
-                printf("  ");
-            }
-        }
-        printf("\n");
-    }
-}
-
-
-
-// Compute softmax activation
-void softmax(double* input, int sampleSize, int outputSize) {
-    for (int sampleIdx = 0; sampleIdx < sampleSize; sampleIdx++) {
-        int buffer = sampleIdx * outputSize;
-
-        double max_val = input[buffer];
+        float max_val = input[buffer];
         for (int i = 1; i < outputSize; i++) {
             max_val = fmax(max_val, input[buffer + i]);
         }
 
-        double sum = 0.0;
+        float sum = 0.0;
         for (int i = 0; i < outputSize; i++) {
-            input[buffer + i] = exp(input[buffer + i] - max_val);
-            sum += input[buffer + i];
+            output[buffer + i] = exp(input[buffer + i] - max_val);
+            sum += output[buffer + i];
         }
 
         for (int i = 0; i < outputSize; i++) {
-            input[buffer + i] /= sum;
+            output[buffer + i] /= sum;
         }
     }
 }
@@ -461,14 +490,14 @@ void softmax(double* input, int sampleSize, int outputSize) {
 */
 
 
-__global__ void matrixMultiKernel(double* A, double* B, double* C, int m, int n, int k) {
-    __shared__ double s_A[TILE_k][TILE_k];
-    __shared__ double s_B[TILE_k][TILE_k];
+__global__ void matrixMultiKernel(float* A, float* B, float* C, int m, int n, int k) {
+    __shared__ float s_A[TILE_k][TILE_k];
+    __shared__ float s_B[TILE_k][TILE_k];
 
     int row = blockIdx.y * blockDim.y + threadIdx.y;
     int col = blockIdx.x * blockDim.x + threadIdx.x;
 
-    double s = 0.0f;
+    float s = 0.0f;
 
     for (int batch_idx = 0; batch_idx < (n + TILE_k - 1) / TILE_k; batch_idx++) {
         int A_col = batch_idx * TILE_k + threadIdx.x;
@@ -495,11 +524,11 @@ __global__ void matrixMultiKernel(double* A, double* B, double* C, int m, int n,
 }
 
 // Matrix multiplication wrapper
-void matrixMultiplication(double* A, int m, int n, double* B, int k, double* C, bool useDevice = false, dim3 blockSize = dim3(1)) {
+void matrixMultiplication(float* A, int m, int n, float* B, int k, float* C, bool useDevice = false, dim3 blockSize = dim3(1)) {
     if (!useDevice) {
         for (int i = 0; i < m; i++) {
             for (int j = 0; j < k; j++) {
-                double sum = 0.0f;
+                float sum = 0.0f;
                 for (int t = 0; t < n; t++) {
                     sum += A[i * n + t] * B[t * k + j];
                 }
@@ -508,18 +537,18 @@ void matrixMultiplication(double* A, int m, int n, double* B, int k, double* C, 
         }
     }
     else {
-        double* d_A, * d_B, * d_C;
-        cudaMalloc((void**)&d_A, m * n * sizeof(double));
-        cudaMalloc((void**)&d_B, n * k * sizeof(double));
-        cudaMalloc((void**)&d_C, m * k * sizeof(double));
+        float* d_A, * d_B, * d_C;
+        cudaMalloc((void**)&d_A, m * n * sizeof(float));
+        cudaMalloc((void**)&d_B, n * k * sizeof(float));
+        cudaMalloc((void**)&d_C, m * k * sizeof(float));
 
-        cudaMemcpy(d_A, A, m * n * sizeof(double), cudaMemcpyHostToDevice);
-        cudaMemcpy(d_B, B, n * k * sizeof(double), cudaMemcpyHostToDevice);
+        cudaMemcpy(d_A, A, m * n * sizeof(float), cudaMemcpyHostToDevice);
+        cudaMemcpy(d_B, B, n * k * sizeof(float), cudaMemcpyHostToDevice);
 
         dim3 gridSize((k + blockSize.x - 1) / blockSize.x, (m + blockSize.y - 1) / blockSize.y);
         matrixMultiKernel <<<gridSize, blockSize >>> (d_A, d_B, d_C, m, n, k);
 
-        cudaMemcpy(C, d_C, m * k * sizeof(double), cudaMemcpyDeviceToHost);
+        cudaMemcpy(C, d_C, m * k * sizeof(float), cudaMemcpyDeviceToHost);
 
         cudaFree(d_A);
         cudaFree(d_B);
@@ -527,8 +556,8 @@ void matrixMultiplication(double* A, int m, int n, double* B, int k, double* C, 
     }
 }
 
-double* transpose(double* matrix, int rowSize, int colSize, bool useDevice = false) {
-    double* output = allocMatrix(colSize, rowSize);
+float* transpose(float* matrix, int rowSize, int colSize, bool useDevice = false) {
+    float* output = allocMatrix(colSize, rowSize);
     if (!useDevice) {
         for (int i = 0; i < rowSize; i++) {
             for (int j = 0; j < colSize; j++) {
@@ -542,13 +571,13 @@ double* transpose(double* matrix, int rowSize, int colSize, bool useDevice = fal
 }
 
 
-double applyRelu(double& a) {
-    return a >= 0 ? a : 0;
+float applyRelu(float& a) {
+    return a > 0 ? a : 0;
 }
 
 
-void computeGradientForOutputLayer(double* output, double* gradOutput, double* targetLabels, int sampleSize, int outputSize = 10) {
-    for (int i = 0; i < sampleSize; i++) {
+void computeGradientForOutputLayer(float* output, float* gradOutput, float* targetLabels, int batchSize, int outputSize = 10) {
+    for (int i = 0; i < batchSize; i++) {
         for (int j = 0; j < outputSize; j++) {
             gradOutput[i * outputSize + j] = output[i * outputSize + j];
         }
@@ -557,32 +586,32 @@ void computeGradientForOutputLayer(double* output, double* gradOutput, double* t
 }
 
 
-void computeGradientForBias(double* gradOutput, double* gradBias, int sampleSize, int outputSize = 10, bool useDevice = false) {
+void computeGradientForBias(float* gradToLoss, float* gradBias, int batchSize, int outputSize = 10, bool useDevice = false) {
     if (!useDevice) {
         for (int i = 0; i < outputSize; i++) {
             gradBias[i] = 0.0;
         }
-        for (int j = 0; j < sampleSize; j++) {
+        for (int j = 0; j < batchSize; j++) {
             for (int i = 0; i < outputSize; i++) {
-                gradBias[i] += gradOutput[j * outputSize + i];
+                gradBias[i] += gradToLoss[j * outputSize + i];
             }
         }
         for (int i = 0; i < outputSize; i++) {
-            gradBias[i] /= sampleSize;
+            gradBias[i] /= batchSize;
         }
     }
 }
 
 
-double computeDerivativeHiddenLayer(double& a) {
-    return a > 0 ? 1.0 : 0.0;
+float retainPositive(float& org, float& dest) {
+    return dest > 0 ? org : 0.0;
 }
 
-double multiply(double& a, double& b) {
+float multiply(float& a, float& b) {
     return a * b;
 }
 
-void elementWiseUnary(double* a, double* c, int rowSize, int colSize, double (*unary)(double&), bool useDevice = false) {
+void elementWiseUnary(float* a, float* c, int rowSize, int colSize, float (*unary)(float&), bool useDevice = false) {
     if (!useDevice) {
         for (int i = 0; i < rowSize; i++) {
             for (int j = 0; j < colSize; j++) {
@@ -593,7 +622,7 @@ void elementWiseUnary(double* a, double* c, int rowSize, int colSize, double (*u
     }
 }
 
-void elementWiseBinary(double* a, double* b, double* c, int rowSize, int colSize, double (*binary)(double&, double&), bool useDevice = false) {
+void elementWiseBinary(float* a, float* b, float* c, int rowSize, int colSize, float (*binary)(float&, float&), bool useDevice = false) {
     if (!useDevice) {
         for (int i = 0; i < rowSize; i++) {
             for (int j = 0; j < colSize; j++) {
@@ -604,13 +633,13 @@ void elementWiseBinary(double* a, double* b, double* c, int rowSize, int colSize
     }
 }
 
-double addition(double& a, double& b) {
+float addition(float& a, float& b) {
     return a + b;
 }
 
-void forward(double* input, double** hiddenWeights, double** activations, double** bias, double* output, 
-        int outputSize, int sampleSize, bool useDevice = false, int featureSize = 784) {
-    double* currentInput = input;
+void forward(float* input, float** hiddenWeights, float** activations, float** bias, float* output, float** Z, float* zOutput, 
+    int outputSize, int batchSize, bool useDevice = false, int featureSize = 784) {
+    float* currentInput = input;
     int currentInputSize = featureSize;
     dim3 blockSize = dim3(1);
     if (useDevice) {
@@ -618,41 +647,45 @@ void forward(double* input, double** hiddenWeights, double** activations, double
         blockSize.y = 128;
     }
     for (int i = 0; i < NUM_HIDDEN_LAYERS; i++) {
-        matrixMultiplication(currentInput, sampleSize, currentInputSize, hiddenWeights[i], HIDDEN_SIZE, activations[i], useDevice, blockSize);
-        
-        for (int j = 0; j < sampleSize; j++) {
-            elementWiseBinary(&activations[i][j * HIDDEN_SIZE], bias[i], &activations[i][j * HIDDEN_SIZE], HIDDEN_SIZE, 1, addition);
+        matrixMultiplication(currentInput, batchSize, currentInputSize, hiddenWeights[i], HIDDEN_SIZE, Z[i], useDevice, blockSize);
+        printMatrix(currentInput, batchSize, currentInputSize);
+        printMatrix(hiddenWeights[i], currentInputSize, HIDDEN_SIZE);
+
+        for (int j = 0; j < batchSize; j++) {
+            elementWiseBinary(&activations[i][j * HIDDEN_SIZE], bias[i], &Z[i][j * HIDDEN_SIZE], HIDDEN_SIZE, 1, addition);
         }
-        
-        elementWiseUnary(activations[i], activations[i], sampleSize, HIDDEN_SIZE, applyRelu);
+        printMatrix(Z[i], batchSize, HIDDEN_SIZE);
+
+        elementWiseUnary(Z[i], activations[i], batchSize, HIDDEN_SIZE, applyRelu);
+        printMatrix(activations[i], batchSize, HIDDEN_SIZE);
 
         currentInputSize = HIDDEN_SIZE;
         currentInput = activations[i];
     }
     
-    matrixMultiplication(currentInput, sampleSize, HIDDEN_SIZE, hiddenWeights[NUM_HIDDEN_LAYERS], outputSize, output, useDevice, blockSize);
+    matrixMultiplication(currentInput, batchSize, HIDDEN_SIZE, hiddenWeights[NUM_HIDDEN_LAYERS], outputSize, zOutput, useDevice, blockSize);
 
-    for (int j = 0; j < sampleSize; j++) {
-        elementWiseBinary(&output[j * outputSize], bias[NUM_HIDDEN_LAYERS], &output[j * outputSize], outputSize, 1, addition);
+    for (int j = 0; j < batchSize; j++) {
+        elementWiseBinary(&zOutput[j * outputSize], bias[NUM_HIDDEN_LAYERS], &zOutput[j * outputSize], outputSize, 1, addition);
     }
 
-    softmax(output,sampleSize, outputSize);
+    softmax(zOutput, output,batchSize, outputSize);
 
 
 }
 
 
-double updateWeight(double& org, double& grad) {
+float updateWeight(float& org, float& grad) {
     return org - LR * grad;
 }
 
-void backward(double* input, double* output, double* targetLabels, double** hiddenWeights, double** activations,
-    double** bias, int sampleSize, bool useDevice = false, int featureSize = 784, int outputSize = OUTPUT_SIZE) {
+void backward(float* input, float* output, float* targetLabels, float** hiddenWeights, float** activations,
+    float** bias,float** Z,float* zOutput , int batchSize, bool useDevice = false, int featureSize = 784, int outputSize = OUTPUT_SIZE) {
     // Allocate gradients
-    double* gradOutput = allocMatrix(sampleSize, outputSize);
+    float* gradOutput = allocMatrix(batchSize, outputSize);
 
-    double** gradWeights = (double**)malloc((NUM_HIDDEN_LAYERS + 1) * sizeof(double*));
-    double** gradBias = (double**)malloc((NUM_HIDDEN_LAYERS + 1) * sizeof(double*));
+    float** gradWeights = (float**)malloc((NUM_HIDDEN_LAYERS + 1) * sizeof(float*));
+    float** gradBias = (float**)malloc((NUM_HIDDEN_LAYERS + 1) * sizeof(float*));
     for (int i = 0; i <= NUM_HIDDEN_LAYERS; i++) {
         int prevSize = (i == 0) ? featureSize : HIDDEN_SIZE;
         int currSize = (i == NUM_HIDDEN_LAYERS) ? outputSize : HIDDEN_SIZE;
@@ -660,8 +693,8 @@ void backward(double* input, double* output, double* targetLabels, double** hidd
         gradBias[i] = allocMatrix(currSize, 1);
     }
 
-    computeGradientForOutputLayer(output, gradOutput, targetLabels, sampleSize, outputSize);
-    double* gradientToLoss = gradOutput;
+    computeGradientForOutputLayer(output, gradOutput, targetLabels, batchSize, outputSize);
+    float* gradientToLoss = gradOutput;
 
     dim3 blockSize(128, 128);
     if (!useDevice) blockSize = dim3(1);
@@ -670,32 +703,31 @@ void backward(double* input, double* output, double* targetLabels, double** hidd
         int currSize = (layer == NUM_HIDDEN_LAYERS) ? outputSize : HIDDEN_SIZE;
         int prevSize = (layer == 0) ? featureSize : HIDDEN_SIZE;
 
-        double* activationsTransposed = (layer == 0) ? transpose(input, sampleSize, featureSize) : transpose(activations[layer - 1], sampleSize, prevSize);
+        float* activationsTransposed = (layer == 0) ? transpose(input, batchSize, featureSize) : transpose(activations[layer - 1], batchSize, prevSize);
 
-        matrixMultiplication(activationsTransposed, prevSize, sampleSize, gradientToLoss, currSize, gradWeights[layer], useDevice, blockSize);
+        matrixMultiplication(activationsTransposed, prevSize, batchSize, gradientToLoss, currSize, gradWeights[layer], useDevice, blockSize);
         free(activationsTransposed);
-
-        computeGradientForBias(gradientToLoss, gradBias[layer], sampleSize, currSize);
+        computeGradientForBias(gradientToLoss, gradBias[layer], batchSize, currSize);
 
         if (layer == 0) break;
 
-        double* weightsTransposed = transpose(hiddenWeights[layer], prevSize, currSize);
-        double* previousGradient = allocMatrix(sampleSize, prevSize);
+        float* weightsTransposed = transpose(hiddenWeights[layer], prevSize, currSize);
+        float* previousGradient = allocMatrix(batchSize, prevSize);
 
-        matrixMultiplication(gradientToLoss, sampleSize, currSize, hiddenWeights[layer], prevSize, previousGradient, useDevice, blockSize);
+        matrixMultiplication(gradientToLoss, batchSize, currSize, hiddenWeights[layer], prevSize, previousGradient, useDevice, blockSize);
+
+        //For derivative of ReLu is a > 0 ? 1.0 : 0.0, and compute of element wise. So it would better to combine the two operation into 1
+        elementWiseBinary(previousGradient, Z[layer - 1], previousGradient, batchSize, prevSize, retainPositive); 
+        
         free(weightsTransposed);
         if(layer < NUM_HIDDEN_LAYERS) 
             free(gradientToLoss);
-        gradientToLoss = allocMatrix(sampleSize, prevSize);
-        elementWiseUnary(activations[layer - 1], gradientToLoss, sampleSize, prevSize, computeDerivativeHiddenLayer);
-        elementWiseBinary(previousGradient, gradientToLoss, gradientToLoss, sampleSize, prevSize, multiply);
-        free(previousGradient);
+        gradientToLoss = previousGradient;
     }
 
     for (int layer = 0; layer <= NUM_HIDDEN_LAYERS; layer++) {
         int currSize = (layer == NUM_HIDDEN_LAYERS) ? outputSize : HIDDEN_SIZE;
         int prevSize = (layer == 0) ? featureSize : HIDDEN_SIZE;
-
         elementWiseBinary(hiddenWeights[layer], gradWeights[layer], hiddenWeights[layer], prevSize, currSize, updateWeight);
         elementWiseBinary(bias[layer], gradBias[layer], bias[layer], currSize, 1, updateWeight);
     }
@@ -711,71 +743,74 @@ void backward(double* input, double* output, double* targetLabels, double** hidd
 
 
 
-double calculateCrossEntropyLoss(double* output, double* trueLabels, int sampleSize, int numClasses) {
-    double totalLoss = 0.0f;
-    for (int sampleIdx = 0; sampleIdx < sampleSize; sampleIdx++) {
-        double sampleLoss = 0.0f;
-        int label = (int)trueLabels[sampleIdx];
-        for (int j = 0; j < numClasses; j++) {
-            if(label == j)
-                sampleLoss -= log(output[numClasses * sampleIdx + j] + 1e-15f);
-        }
-        totalLoss += sampleLoss;
+float calculateCrossEntropyLoss(float* output, float* trueLabels, int batchSize, int numClasses) {
+    float totalLoss = 0.0;
+    for (int batchIdx = 0; batchIdx < batchSize; batchIdx++) {
+        int label = (int)trueLabels[batchIdx];
+        float predicted_prob = output[numClasses * batchIdx + label];
+
+        totalLoss -= log(predicted_prob + 1e-15);
     }
     return totalLoss;
 }
 
-double calculateAccuracy(double* output, double* trueLabels, int sampleSize, int numClasses) {
+float calculateAccuracy(float* output, float* trueLabels, int batchSize, int numClasses) {
     int correct = 0;
-    for (int sampleIdx = 0; sampleIdx < sampleSize; sampleIdx++) {
-        int truth = (int)trueLabels[sampleIdx];
-        double maxPred = 0.0f;
-        int label = -1;
+    int labels[] = { 0,0,0,0,0,0,0,0,0,0 };
+    for (int batchIdx = 0; batchIdx < batchSize; batchIdx++) {
+        int truth = (int)trueLabels[batchIdx];
+        int label = 0;
         for (int j = 0; j < numClasses; j++) {
-            double pred = output[numClasses * sampleIdx + j];
-            if (pred > maxPred) {
-                maxPred = pred;
-                label = j;
-            }
+            label = (output[batchIdx * numClasses + j] > output[batchIdx * numClasses +  label]) ? j : label;
         }
         
         // DEBUG print
-        // printf("\nLabel: %d - Truth: %d - Prob: %.2f\n", label, truth, maxPred);
-        // for (int i = 0; i < numClasses; i++) {
-        //     printf("%.2lf ", output[numClasses * sampleIdx + i]);
-        // }
-        // _sleep(50);
+      /*   printf("\nLabel: %d - Truth: %d - Prob: %.2f\n", label, truth, output[batchIdx * numClasses + label]);
+         for (int i = 0; i < numClasses; i++) {
+             printf("%.2lf ", output[numClasses * batchIdx + i]);
+         }
+         _sleep(50);*/
         if (label == truth) {
             correct += 1;
         }
+        labels[label] += 1;
     }
+
+    //for (int i = 0; i < numClasses; i++) {
+    //    printf("Guess label %d for %d times, ", i, labels[i]);
+    //}
+    //printf("\n");
     return correct * 1.0;
 }
 
-void train(double** dataset, double* labels, double** hiddenWeights, double** bias, int epochSize, int sampleSize, int featureSize, int totalSize, const char* configFile, int outputSize = 10) {
+void train(float** dataset, float* labels, float** hiddenWeights, float** bias, int epochSize, int batchSize, int featureSize, int totalSize, const char* configFile,int step_save = 5, int outputSize = 10) {
     for (int epoch = 0; epoch < epochSize; epoch++) {
-        double totalLoss = 0.0;
-        double totalAccuracy = 0.0;
-
-        for (int sampleIdx = 0; sampleIdx * sampleSize < totalSize; sampleIdx++) {
-            int startIdx = sampleIdx * sampleSize;
-            int end = ((startIdx + sampleSize) > totalSize) ? (totalSize - startIdx) : sampleSize;
-
-            double* sample = dataset[startIdx];
-            double* batchLabels = &labels[startIdx];
-
-            double** activations = (double**)malloc(NUM_HIDDEN_LAYERS * sizeof(double*));
+        float totalLoss = 0.0;
+        float totalAccuracy = 0.0;
+        int numBatch = (totalSize - 1) / batchSize + 1;
+        for (int batchIdx = 0; batchIdx < numBatch; batchIdx++) {
+            int startIdx = batchIdx * batchSize;
+            int end = ((startIdx + batchSize) > totalSize) ? (totalSize - startIdx) : batchSize;
+            float* batchLabels = &labels[startIdx];
+            
+            float** activations = (float**)malloc(NUM_HIDDEN_LAYERS * sizeof(float*));
             for (int i = 0; i < NUM_HIDDEN_LAYERS; i++) {
                 activations[i] = allocMatrix(end, HIDDEN_SIZE);
             }
 
-            double* output = allocMatrix(end, outputSize);
-            forward(sample, hiddenWeights, activations, bias, output, outputSize, end, true);
+            float** Z = (float**)malloc(NUM_HIDDEN_LAYERS * sizeof(float*));
+            for (int i = 0; i < NUM_HIDDEN_LAYERS; i++) {
+                Z[i] = allocMatrix(end, HIDDEN_SIZE);
+            }
+
+            float* zOutput = allocMatrix(end, outputSize);
+            float* output = allocMatrix(end, outputSize);
+            forward(dataset[batchIdx], hiddenWeights, activations, bias, output,Z, zOutput, outputSize, end, true);
 
             totalLoss += calculateCrossEntropyLoss(output, batchLabels, end, outputSize);
             totalAccuracy += calculateAccuracy(output, batchLabels, end, outputSize);
 
-            backward(sample, output, batchLabels, hiddenWeights, activations, bias, end, true);
+            backward(dataset[batchIdx], output, batchLabels, hiddenWeights, activations, bias, Z, zOutput, end, true);
 
             free(output);
             for (int i = 0; i < NUM_HIDDEN_LAYERS; i++) {
@@ -783,19 +818,21 @@ void train(double** dataset, double* labels, double** hiddenWeights, double** bi
             }
             free(activations);
         }
-
         totalLoss /= totalSize;
         totalAccuracy /= totalSize;
-        char saveFile[256];
-        snprintf(saveFile, sizeof(saveFile), "./checkpoints/wandb_%d.txt", epoch);
-        saveWANDB(hiddenWeights, bias, featureSize, outputSize, saveFile);
-        if (totalAccuracy > BEST_ACCURACY) {
-            saveWANDB(hiddenWeights, bias, featureSize, outputSize, "best.txt");
-            modifyConfig(configFile, "BEST_CHECKPOINT", "best.txt");
-            char accuracyStr[10];
-            snprintf(accuracyStr, sizeof(accuracyStr), "%lf", totalAccuracy);
-            modifyConfig(configFile, "BEST_ACCURACY", accuracyStr);
+        if ((epoch + 1) % step_save == 0) {
+            char saveFile[256];
+            snprintf(saveFile, sizeof(saveFile), "./checkpoints/wandb_%d.txt", epoch);
+            saveWANDB(hiddenWeights, bias, featureSize, outputSize, saveFile);
+            if (fabs(totalAccuracy - BEST_ACCURACY) > 1e-4f) { // Make sure the difference it correct since this one is floating point
+                saveWANDB(hiddenWeights, bias, featureSize, outputSize, "best.txt");
+                modifyConfig(configFile, "BEST_CHECKPOINT", "best.txt");
+                char accuracyStr[10];
+                snprintf(accuracyStr, sizeof(accuracyStr), "%lf", totalAccuracy);
+                modifyConfig(configFile, "BEST_ACCURACY", accuracyStr);
+            }
         }
+        
         printf("Epoch %d, Loss: %.4f, Accuracy: %.4f\n", epoch + 1, totalLoss, totalAccuracy);
     }
 
@@ -827,81 +864,79 @@ int main(int argc, char *argv[]) {
     if (_mkdir("./checkpoints") == 0) {
         printf("Checkpoint directory created: %s\n", "./checkpoints");
     } else if (errno == EEXIST) {
-        printf("Directory already exists!");
+        printf("Directory already exists!\n");
     } else {
-        perror("Error creating directory!");
+        perror("Error creating directory!\n");
     }
 
     loadConfig(configFile);
     int train_image_count, train_label_count;
     int image_size;
-    double* train_images = readImages(TRAIN_IMAGE, &train_image_count, &image_size);
-    double* train_labels = readLabels(TRAIN_LABEL, &train_label_count);
+
+    const int epochs = 1000;
+    const int batchSize = 3;
+
+    float** hiddenWeights = (float**)malloc((NUM_HIDDEN_LAYERS + 1) * sizeof(float*));
+    float** bias = (float**)malloc((NUM_HIDDEN_LAYERS + 1) * sizeof(float*));
+    float** train_images = readImages(TRAIN_IMAGE, &train_image_count, &image_size, batchSize);
+    float* train_labels = readLabels(TRAIN_LABEL, &train_label_count);
     if (!train_images || !train_labels) {
         printf("Failed to load Fashion MNIST data.\n");
         return 1;
     }
 
-    const int epochs = 1000;
-    const int batchSize = 32000;
-    double** dataset = (double**)malloc(train_image_count * sizeof(double*));
-    for (int i = 0; i < train_image_count; i++) {
-        dataset[i] = train_images + i * image_size;
-    }
-
-    double** hiddenWeights = (double**)malloc((NUM_HIDDEN_LAYERS + 1) * sizeof(double*));
-    double** bias = (double**)malloc((NUM_HIDDEN_LAYERS + 1) * sizeof(double*));
     // Set test = true to load weights & biases from file
     bool check = initWANDB(hiddenWeights, bias, image_size, OUTPUT_SIZE, test);
     if (!check) {
         perror("Error intializing weights & biases.\nTerminating program...\n");
-        free(dataset);
         free(train_images);
         free(train_labels);
         return 1;
     }
+    
     if (test) {
         // TODO: Test function
     } else {
-        train(dataset, train_labels, hiddenWeights, bias, epochs, 5000, image_size, train_image_count, configFile);
+        train(train_images, train_labels, hiddenWeights, bias, epochs, batchSize, image_size, train_image_count, configFile,10);
     }
     
-
-    free(dataset);
+    for (int i = 0; i < (train_image_count - 1 / batchSize) + 1; i++) {
+        free(train_images[i]);
+    }
     free(train_images);
     free(train_labels);
 
     // Test matrix multiplication
-    // double a[6] = {2, 3, 4, 5, 6, 7};
-    // double b[6] = {7, 8, 9, 10, 11, 12};
-    // double c[9];
-    // double real_c[9];
+    // float a[6] = {2, 3, 4, 5, 6, 7};
+    // float b[6] = {7, 8, 9, 10, 11, 12};
+    // float c[9];
+    // float real_c[9];
     // matrixMultiplication(a, 3, 2, b, 3, c, false);
     // matrixMultiplication(a, 3, 2, b, 3, real_c, false);
     // printMatrix(c, 3, 3);
     // printMatrix(real_c, 3, 3);
 
     // Test loss function
-    // double a[20] = {0.10, 0.09, 0.11, 0.09, 0.10, 0.10, 0.10, 0.10, 0.11, 0.10, 0.09, 0.11, 0.09, 0.10, 0.10, 0.10, 0.10, 0.11};
-    // double b[2] = {0, 2};
+    // float a[20] = {0.10, 0.09, 0.11, 0.09, 0.10, 0.10, 0.10, 0.10, 0.11, 0.10, 0.09, 0.11, 0.09, 0.10, 0.10, 0.10, 0.10, 0.11};
+    // float b[2] = {0, 2};
     // printf("%.2lf", calculateCrossEntropyLoss(a, b, 2, 10));
 
     // Test softmax
-    // double a[5] = {1.3, 5.1, 2.2, 0.7, 1.1};
+    // float a[5] = {1.3, 5.1, 2.2, 0.7, 1.1};
     // softmax(a, 5);
     // for (int i = 0; i < 5; i++) {
     //     printf("%.2lf ", a[i]);
     // }
 
     // Test accuracy
-    // double a[20] = {0.10, 0.09, 0.11, 0.09, 0.10, 0.10, 0.10, 0.10, 0.11, 0.10, 
+    // float a[20] = {0.10, 0.09, 0.11, 0.09, 0.10, 0.10, 0.10, 0.10, 0.11, 0.10, 
     //                 0.10, 0.09, 0.11, 0.09, 0.10, 0.10, 0.10, 0.10, 0.11, 0.10};
-    // double b[2] = {0, 2};
+    // float b[2] = {0, 2};
     // printf("%.2lf", calculateAccuracy(a, b, 2, 10));
 
     // Test load/save weights
-    // double** hiddenWeights = (double**)malloc((NUM_HIDDEN_LAYERS + 1) * sizeof(double*));
-    // double** bias = (double**)malloc((NUM_HIDDEN_LAYERS + 1) * sizeof(double*));
+    // float** hiddenWeights = (float**)malloc((NUM_HIDDEN_LAYERS + 1) * sizeof(float*));
+    // float** bias = (float**)malloc((NUM_HIDDEN_LAYERS + 1) * sizeof(float*));
     // for (int i = 0; i <= NUM_HIDDEN_LAYERS; i++) {
     //     int prevSize = (i == 0) ? 784 : HIDDEN_SIZE;
     //     int currSize = (i == NUM_HIDDEN_LAYERS) ? 10 : HIDDEN_SIZE;
