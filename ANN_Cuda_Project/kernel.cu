@@ -43,6 +43,9 @@ char TEST_IMAGE[512] = "D:/gpu_project_course/fashion/t10k-images-idx3-ubyte";
 char TEST_LABEL[512] = "D:/gpu_project_course/fashion/t10k-labels-idx1-ubyte";
 int HIDDEN_SIZE = 128;
 int OUTPUT_SIZE = 10;
+char LATEST_CHECKPOINT[512] = "None";
+char BEST_CHECKPOINT[512] = "None";
+double BEST_ACCURACY = 0.0f;
 
 void setConfigValue(const char* key, const char* value) {
     if (strcmp(key, "NUM_HIDDEN_LAYERS") == 0) {
@@ -69,6 +72,10 @@ void setConfigValue(const char* key, const char* value) {
         HIDDEN_SIZE = atoi(value);
     } else if (strcmp(key, "OUTPUT_SIZE") == 0) {
         OUTPUT_SIZE = atoi(value);
+    } else if (strcmp(key, "LATEST_CHECKPOINT") == 0) {
+        strncpy(LATEST_CHECKPOINT, value, sizeof(LATEST_CHECKPOINT));
+    } else if (strcmp(key, "BEST_CHECKPOINT") == 0) {
+        strncpy(BEST_CHECKPOINT, value, sizeof(BEST_CHECKPOINT));
     }
 }
 
@@ -101,6 +108,83 @@ void loadConfig(const char* filename) {
             }
 
             setConfigValue(key, trimmed_value);
+        }
+    }
+
+    fclose(file);
+}
+
+// Write weights & biases to file
+void saveWANDB(double** hiddenWeights, double** bias, int featureSize, const char* filepath) {
+    FILE *file = fopen(filepath, "w");
+    
+    if (file == NULL) {
+        perror("Error opening configuration file");
+        return;
+    }
+
+    for (int i = 0; i <= NUM_HIDDEN_LAYERS; i++) {
+        int prevSize = (i == 0) ? featureSize : HIDDEN_SIZE;
+        int currSize = (i == NUM_HIDDEN_LAYERS) ? OUTPUT_SIZE : HIDDEN_SIZE;
+        for (int j = 0; j < prevSize * currSize; j++) {
+            fprintf(file, "%lf ", hiddenWeights[i][j]);
+        }
+        fprintf(file, "\n");
+    }
+
+    for (int i = 0; i <= NUM_HIDDEN_LAYERS; i++) {
+        int prevSize = (i == 0) ? featureSize : HIDDEN_SIZE;
+        int currSize = (i == NUM_HIDDEN_LAYERS) ? OUTPUT_SIZE : HIDDEN_SIZE;
+        printf("Current size: %d\n", currSize);
+        for (int j = 0; j < currSize; j++) {
+            fprintf(file, "%lf ", bias[i][j]);
+        }
+        fprintf(file, "\n");
+    }
+    fclose(file);
+}
+
+// Load weights & biases for testing
+void loadWANDB(double** hiddenWeights, double** bias, int featureSize, const char* filepath = nullptr) {
+    FILE* file;
+
+    // Auto-load best model
+    if (filepath == nullptr) {
+        // No best model found
+        if (strcmp(BEST_CHECKPOINT, "None") == 0) {
+            perror("No model file could be found!");
+            return;
+        }
+        file = fopen(BEST_CHECKPOINT, "r");   
+    }
+    else {
+        file = fopen(filepath, "r");
+    }
+
+    if (file == NULL) {
+        perror("Error opening configuration file");
+        return;
+    }
+
+    printf("Loading weights\n");
+    for (int i = 0; i <= NUM_HIDDEN_LAYERS; i++) {
+        int prevSize = (i == 0) ? featureSize : HIDDEN_SIZE;
+        int currSize = (i == NUM_HIDDEN_LAYERS) ? OUTPUT_SIZE : HIDDEN_SIZE;
+        for (int j = 0; j < prevSize * currSize; j++) {
+            double tmp = 0.0f;
+            fscanf(file, "%lf", &tmp);
+            hiddenWeights[i][j] = tmp;
+        }
+        printf("________________________________________\n");
+    }
+
+    printf("Loading biases\n");
+    for (int i = 0; i <= NUM_HIDDEN_LAYERS; i++) {
+        int currSize = (i == NUM_HIDDEN_LAYERS) ? OUTPUT_SIZE : HIDDEN_SIZE;
+        for (int j = 0; j < currSize; j++) {
+            double tmp = 0.0f;
+            fscanf(file, "%lf", &tmp);
+            bias[i][j] = tmp;
         }
     }
 
@@ -620,19 +704,9 @@ double calculateAccuracy(double* output, double* trueLabels, int sampleSize, int
     return (correct * 1.0) / sampleSize;
 }
 
-void train(double** dataset, double* labels, int epochSize, int sampleSize, int featureSize, int totalSize, int outputSize = 10) {
-    double** hiddenWeights = (double**)malloc((NUM_HIDDEN_LAYERS + 1) * sizeof(double*));
-    double** bias = (double**)malloc((NUM_HIDDEN_LAYERS + 1) * sizeof(double*));
-    for (int i = 0; i <= NUM_HIDDEN_LAYERS; i++) {
-        int prevSize = (i == 0) ? featureSize : HIDDEN_SIZE;
-        int currSize = (i == NUM_HIDDEN_LAYERS) ? outputSize : HIDDEN_SIZE;
-
-        hiddenWeights[i] = initRandomMatrix(prevSize, currSize, -0.5, 0.5);
-        bias[i] = initRandomMatrix(currSize,1, -0.5, 0.5);
-        printf("At layer %d: (%d,%d)\n", i, prevSize, currSize);
-    }
+void train(double** dataset, double* labels, double** hiddenWeights, double** bias, int epochSize, int sampleSize, int featureSize, int totalSize, int outputSize = 10) {
     double totalLoss = 0.0;
-
+    double accuracy = 0.0f;
     for (int epoch = 0; epoch < epochSize; epoch++) {
         int batchSize = 0;
         for (int sampleIdx = 0; sampleIdx * sampleSize < totalSize; sampleIdx++) {
@@ -650,7 +724,7 @@ void train(double** dataset, double* labels, int epochSize, int sampleSize, int 
             
             double loss = calculateCrossEntropyLoss(output, &labels[sampleTrueIdx], end, outputSize);
             // Per batch accuracy (not total)
-            double accuracy = calculateAccuracy(output, &labels[sampleTrueIdx], end, outputSize);
+            accuracy = calculateAccuracy(output, &labels[sampleTrueIdx], end, outputSize);
             printf("Epoch %d, Batch ID %d, Loss: %.4f, Acc: %.4f\n", epoch + 1, sampleIdx + 1, loss, accuracy);
 
             backward(sample, output, &labels[sampleTrueIdx], hiddenWeights, activations, bias, end, true, blockSize);
@@ -661,6 +735,13 @@ void train(double** dataset, double* labels, int epochSize, int sampleSize, int 
             free(activations);
             free(output);
             batchSize++;
+        }
+        // Save model per epoch
+        char saveFile[64];
+        snprintf(saveFile, sizeof(saveFile), "checkpoints/wandb_%d.txt", epoch);
+        saveWANDB(hiddenWeights, bias, featureSize, saveFile);
+        if (accuracy > BEST_ACCURACY) {
+            saveWANDB(hiddenWeights, bias, featureSize, "best.txt");
         }
     }
 
@@ -673,7 +754,7 @@ void train(double** dataset, double* labels, int epochSize, int sampleSize, int 
 }
 
 int main() {
-    //loadConfig("config.txt");
+    loadConfig("config.txt");
     int train_image_count, train_label_count;
     int image_size;
     double* train_images = readImages(TRAIN_IMAGE, &train_image_count, &image_size);
@@ -690,7 +771,18 @@ int main() {
         dataset[i] = train_images + i * image_size;
     }
 
-    train(dataset, train_labels, epochs, 5000, image_size, train_image_count);
+    double** hiddenWeights = (double**)malloc((NUM_HIDDEN_LAYERS + 1) * sizeof(double*));
+    double** bias = (double**)malloc((NUM_HIDDEN_LAYERS + 1) * sizeof(double*));
+    for (int i = 0; i <= NUM_HIDDEN_LAYERS; i++) {
+        int prevSize = (i == 0) ? image_size : HIDDEN_SIZE;
+        int currSize = (i == NUM_HIDDEN_LAYERS) ? 10 : HIDDEN_SIZE;
+
+        hiddenWeights[i] = initRandomMatrix(prevSize, currSize, -0.5, 0.5);
+        bias[i] = initRandomMatrix(currSize,1, 0.0, 0.0);
+        printf("At layer %d: (%d,%d)\n", i, prevSize, currSize);
+    }
+
+    train(dataset, train_labels, hiddenWeights, bias, epochs, 5000, image_size, train_image_count);
 
     free(dataset);
     free(train_images);
@@ -723,5 +815,20 @@ int main() {
     //                 0.10, 0.09, 0.11, 0.09, 0.10, 0.10, 0.10, 0.10, 0.11, 0.10};
     // double b[2] = {0, 2};
     // printf("%.2lf", calculateAccuracy(a, b, 2, 10));
+
+    // Test load/save weights
+    // double** hiddenWeights = (double**)malloc((NUM_HIDDEN_LAYERS + 1) * sizeof(double*));
+    // double** bias = (double**)malloc((NUM_HIDDEN_LAYERS + 1) * sizeof(double*));
+    // for (int i = 0; i <= NUM_HIDDEN_LAYERS; i++) {
+    //     int prevSize = (i == 0) ? 784 : HIDDEN_SIZE;
+    //     int currSize = (i == NUM_HIDDEN_LAYERS) ? 10 : HIDDEN_SIZE;
+
+    //     hiddenWeights[i] = initRandomMatrix(prevSize, currSize, -0.5, 0.5);
+    //     bias[i] = initRandomMatrix(currSize,1, 0.0, 0.0);
+    //     printf("At layer %d: (%d,%d)\n", i, prevSize, currSize);
+    // }
+    // loadWANDB(hiddenWeights, bias, 784, "wandb.txt");
+    // printf("Finished loading\n");
+    // saveWANDB(hiddenWeights, bias, 784, "test.txt");
     return 0;
 }
