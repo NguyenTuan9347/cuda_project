@@ -31,12 +31,12 @@
 }
 
 // Global variables
-int NUM_HIDDEN_LAYERS = 3;
+int NUM_HIDDEN_LAYERS = 2;
 int MAX_IMAGESIZE = 784;  // 28x28 flattened size
 int NUM_TRAIN = 60000;
 int NUM_TEST = 10000;
 int SIZE = 784;
-double LR = 0.01;
+double LR = 0.1;
 char TRAIN_IMAGE[512] = "D:/gpu_project_course/fashion/train-images-idx3-ubyte";
 char TRAIN_LABEL[512] = "D:/gpu_project_course/fashion/train-labels-idx1-ubyte";
 char TEST_IMAGE[512] = "D:/gpu_project_course/fashion/t10k-images-idx3-ubyte";
@@ -323,11 +323,23 @@ double* readImages(const char* path, int* num_images, int* image_size) {
 void printMatrix(double* matrix, int rowSize, int colSize) {
     for (int i = 0; i < rowSize; i++) {
         for (int j = 0; j < colSize; j++) {
-            printf("%d ", matrix[i * colSize + j]);
+            printf("%.2f ", matrix[i * colSize + j]);
         }
         printf("\n");
     }
     printf("\n");
+}
+
+double calChange(double* a, double* b, int rowSize, int colSize, double (*binary)(double& a, double& b)) {
+    double sum = 0.0;
+    for (int i = 0; i < rowSize; i++) {
+        for (int j = 0; j < colSize; j++) {
+            int idx = i * colSize + j;
+            sum += binary(a[idx], b[idx]);
+        }
+        
+    }
+    return sum;
 }
 
 void displayImg(const double* image, int rows, int cols) {
@@ -353,41 +365,18 @@ void softmax(double* input, int sampleSize, int outputSize) {
 
         double max_val = input[buffer];
         for (int i = 1; i < outputSize; i++) {
-            if (input[buffer + i] > max_val) {
-                max_val = input[buffer + i];
-            }
+            max_val = fmax(max_val, input[buffer + i]);
         }
 
         double sum = 0.0;
         for (int i = 0; i < outputSize; i++) {
-            double tmp = exp(input[buffer + i] - max_val);
-            sum += tmp;
+            input[buffer + i] = exp(input[buffer + i] - max_val);
+            sum += input[buffer + i];
         }
 
         for (int i = 0; i < outputSize; i++) {
-            double tmp = exp(input[buffer + i] - max_val);
-
-            input[buffer + i] = (tmp / sum);
+            input[buffer + i] /= sum;
         }
-    }
-}
-
-// Compute loss (cross-entropy)
-double computeLoss(double* output, int label, int size) {
-    double loss = 0.0f;
-    double* labels = (double*)malloc(sizeof(double) * size);
-    for (int i = 0; i < size; i++) labels[i] = 0.0;
-    labels[label] = 1.0;
-    for (int i = 0; i < size; i++) {
-        loss -= labels[i] * logf(output[i]);
-    }
-    free(labels);
-    return loss;
-}
-
-void applyActivationDerivative(double* gradient, double* activation, int size) {
-    for (int i = 0; i < size; i++) {
-        gradient[i] *= (activation[i] > 0) ? 1 : 0;
     }
 }
 
@@ -481,37 +470,40 @@ double* transpose(double* matrix, int rowSize, int colSize, bool useDevice = fal
 }
 
 
-// Apply ReLU activation
 double applyRelu(double& a) {
     return a >= 0 ? a : 0;
 }
 
 
-void computeGradientForOutputLayer(double* output, double* gradOutput, double* targetLabels, int sampleSize, int outputSize = 10, bool useDevice = false) {
-    if (!useDevice) {
-        for (int i = 0; i < sampleSize; i++) {
-            for (int j = 0; j < outputSize; j++) {
-                gradOutput[i * outputSize + j] = output[i * outputSize + j];
-            }
-            gradOutput[i * outputSize + (int)targetLabels[i]] -= 1.0;
+void computeGradientForOutputLayer(double* output, double* gradOutput, double* targetLabels, int sampleSize, int outputSize = 10) {
+    for (int i = 0; i < sampleSize; i++) {
+        for (int j = 0; j < outputSize; j++) {
+            gradOutput[i * outputSize + j] = output[i * outputSize + j];
         }
+        gradOutput[i * outputSize + (int)targetLabels[i]] -= 1.0;
     }
 }
 
+
 void computeGradientForBias(double* gradOutput, double* gradBias, int sampleSize, int outputSize = 10, bool useDevice = false) {
     if (!useDevice) {
-        for (int j = 0; j < outputSize; j++) {
-            gradBias[j] = 0.0;
-            for (int i = 0; i < sampleSize; i++) {
-                gradBias[j] += gradOutput[i * outputSize + j];
+        for (int i = 0; i < outputSize; i++) {
+            gradBias[i] = 0.0;
+        }
+        for (int j = 0; j < sampleSize; j++) {
+            for (int i = 0; i < outputSize; i++) {
+                gradBias[i] += gradOutput[j * outputSize + i];
             }
+        }
+        for (int i = 0; i < outputSize; i++) {
+            gradBias[i] /= sampleSize;
         }
     }
 }
 
 
 double computeDerivativeHiddenLayer(double& a) {
-    return a > 0 ? a : 0;
+    return a > 0 ? 1.0 : 0.0;
 }
 
 double multiply(double& a, double& b) {
@@ -523,7 +515,7 @@ void elementWiseUnary(double* a, double* c, int rowSize, int colSize, double (*u
         for (int i = 0; i < rowSize; i++) {
             for (int j = 0; j < colSize; j++) {
                 int idx = i * colSize + j;
-                c[idx] = unary(a[idx]);            
+                c[idx] = unary(a[idx]);          
             }
         }
     }
@@ -545,10 +537,14 @@ double addition(double& a, double& b) {
 }
 
 void forward(double* input, double** hiddenWeights, double** activations, double** bias, double* output, 
-        int outputSize, int sampleSize, bool useDevice = false, dim3 blockSize = dim3(1), int featureSize = 728) {
+        int outputSize, int sampleSize, bool useDevice = false, int featureSize = 784) {
     double* currentInput = input;
     int currentInputSize = featureSize;
-
+    dim3 blockSize = dim3(1);
+    if (useDevice) {
+        blockSize.x = 128;
+        blockSize.y = 128;
+    }
     for (int i = 0; i < NUM_HIDDEN_LAYERS; i++) {
         matrixMultiplication(currentInput, sampleSize, currentInputSize, hiddenWeights[i], HIDDEN_SIZE, activations[i], useDevice, blockSize);
         
@@ -561,10 +557,16 @@ void forward(double* input, double** hiddenWeights, double** activations, double
         currentInputSize = HIDDEN_SIZE;
         currentInput = activations[i];
     }
-
+    
     matrixMultiplication(currentInput, sampleSize, HIDDEN_SIZE, hiddenWeights[NUM_HIDDEN_LAYERS], outputSize, output, useDevice, blockSize);
 
+    for (int j = 0; j < sampleSize; j++) {
+        elementWiseBinary(&output[j * outputSize], bias[NUM_HIDDEN_LAYERS], &output[j * outputSize], outputSize, 1, addition);
+    }
+
     softmax(output,sampleSize, outputSize);
+
+
 }
 
 
@@ -572,86 +574,58 @@ double updateWeight(double& org, double& grad) {
     return org - LR * grad;
 }
 
-void backward(double* input, double* output, double* targetLabels, double** hiddenWeights, double** activations, 
-        double** bias, int sampleSize, bool useDevice = false, dim3 blockSize = dim3(1), int featureSize = 728, int outputSize = OUTPUT_SIZE) {
-    double* gradOutput = (double*)malloc(sampleSize * outputSize * sizeof(double));
-    double** gradWeights = (double**)malloc((NUM_HIDDEN_LAYERS+1) * sizeof(double*));
-    double** gradBias = (double**)malloc((NUM_HIDDEN_LAYERS + 1) * sizeof(double*));
-    int activationColSize = HIDDEN_SIZE;
+void backward(double* input, double* output, double* targetLabels, double** hiddenWeights, double** activations,
+    double** bias, int sampleSize, bool useDevice = false, int featureSize = 784, int outputSize = OUTPUT_SIZE) {
+    // Allocate gradients
+    double* gradOutput = allocMatrix(sampleSize, outputSize);
 
+    double** gradWeights = (double**)malloc((NUM_HIDDEN_LAYERS + 1) * sizeof(double*));
+    double** gradBias = (double**)malloc((NUM_HIDDEN_LAYERS + 1) * sizeof(double*));
     for (int i = 0; i <= NUM_HIDDEN_LAYERS; i++) {
         int prevSize = (i == 0) ? featureSize : HIDDEN_SIZE;
         int currSize = (i == NUM_HIDDEN_LAYERS) ? outputSize : HIDDEN_SIZE;
-        gradWeights[i] = (double*)allocMatrix(prevSize, currSize);
-        gradBias[i] = (double*)allocMatrix(currSize, 1);
+        gradWeights[i] = allocMatrix(prevSize, currSize);
+        gradBias[i] = allocMatrix(currSize, 1);
     }
 
     computeGradientForOutputLayer(output, gradOutput, targetLabels, sampleSize, outputSize);
-
     double* gradientToLoss = gradOutput;
 
-    double* outputTranposed = transpose(output, sampleSize, outputSize);
+    dim3 blockSize(128, 128);
+    if (!useDevice) blockSize = dim3(1);
 
-    matrixMultiplication(outputTranposed, outputSize, sampleSize, gradientToLoss, outputSize, gradWeights[NUM_HIDDEN_LAYERS],useDevice,blockSize);
+    for (int layer = NUM_HIDDEN_LAYERS; layer >= 0; layer--) {
+        int currSize = (layer == NUM_HIDDEN_LAYERS) ? outputSize : HIDDEN_SIZE;
+        int prevSize = (layer == 0) ? featureSize : HIDDEN_SIZE;
 
-    computeGradientForBias(gradientToLoss, gradBias[NUM_HIDDEN_LAYERS], sampleSize, outputSize);
-    
-    free(outputTranposed);
+        double* activationsTransposed = (layer == 0) ? transpose(input, sampleSize, featureSize) : transpose(activations[layer - 1], sampleSize, prevSize);
 
-    double* weightsTransposed = transpose(hiddenWeights[NUM_HIDDEN_LAYERS], activationColSize, outputSize);
-    double* derivativeOfActivation = allocMatrix(sampleSize, activationColSize);
-    double* previousGradient = allocMatrix(sampleSize, activationColSize);
-
-    matrixMultiplication(gradientToLoss, sampleSize, outputSize, weightsTransposed, activationColSize, previousGradient, useDevice, blockSize);
-
-    elementWiseUnary(activations[NUM_HIDDEN_LAYERS - 1], derivativeOfActivation, sampleSize, activationColSize, computeDerivativeHiddenLayer);
-    elementWiseBinary(previousGradient, derivativeOfActivation, previousGradient, sampleSize, activationColSize, multiply);
-
-
-    gradientToLoss = previousGradient;
-    free(weightsTransposed);
-    free(derivativeOfActivation);
-    
-
-    for (int i = NUM_HIDDEN_LAYERS-1; i >= 0; i--) {
-        int weightColSize = (i == NUM_HIDDEN_LAYERS) ? outputSize : HIDDEN_SIZE;
-        int weightRowSize = (i == 0) ? featureSize : HIDDEN_SIZE;
-
-        double* activationsTransposed = transpose(activations[i], sampleSize, activationColSize);
-
-        matrixMultiplication(activationsTransposed, activationColSize, sampleSize, gradientToLoss, weightColSize, gradWeights[i]);
-
-        computeGradientForBias(gradientToLoss, gradBias[i], sampleSize, weightColSize);
-
-        if (i > 0) {
-            weightsTransposed = transpose(hiddenWeights[i], weightRowSize, weightColSize);
-            derivativeOfActivation = allocMatrix(sampleSize, activationColSize);
-            previousGradient = allocMatrix(sampleSize, activationColSize);
-
-            matrixMultiplication(gradientToLoss, sampleSize, weightColSize, weightsTransposed, activationColSize, previousGradient, useDevice, blockSize);
-
-            elementWiseUnary(activations[i - 1], derivativeOfActivation, sampleSize, activationColSize, computeDerivativeHiddenLayer);
-            elementWiseBinary(previousGradient, derivativeOfActivation, previousGradient, sampleSize, activationColSize, multiply);
-
-            free(gradientToLoss);
-
-            gradientToLoss = previousGradient;
-
-            free(weightsTransposed);
-            free(derivativeOfActivation);
-
-        }
-
+        matrixMultiplication(activationsTransposed, prevSize, sampleSize, gradientToLoss, currSize, gradWeights[layer], useDevice, blockSize);
         free(activationsTransposed);
+
+        computeGradientForBias(gradientToLoss, gradBias[layer], sampleSize, currSize);
+
+        if (layer == 0) break;
+
+        double* weightsTransposed = transpose(hiddenWeights[layer], prevSize, currSize);
+        double* previousGradient = allocMatrix(sampleSize, prevSize);
+
+        matrixMultiplication(gradientToLoss, sampleSize, currSize, hiddenWeights[layer], prevSize, previousGradient, useDevice, blockSize);
+        free(weightsTransposed);
+        if(layer < NUM_HIDDEN_LAYERS) 
+            free(gradientToLoss);
+        gradientToLoss = allocMatrix(sampleSize, prevSize);
+        elementWiseUnary(activations[layer - 1], gradientToLoss, sampleSize, prevSize, computeDerivativeHiddenLayer);
+        elementWiseBinary(previousGradient, gradientToLoss, gradientToLoss, sampleSize, prevSize, multiply);
+        free(previousGradient);
     }
-    
-      
-    // Update weights and bias
-    for (int i = NUM_HIDDEN_LAYERS; i >= 0; i--) {
-        int weightColSize = (i == NUM_HIDDEN_LAYERS) ? outputSize : HIDDEN_SIZE;
-        int weightRowSize = (i == 0) ? featureSize : HIDDEN_SIZE;
-        elementWiseBinary(hiddenWeights[i], gradWeights[i], hiddenWeights[i], weightRowSize, weightColSize, updateWeight);
-        elementWiseBinary(bias[i], gradBias[i], bias[i], 1, weightColSize, updateWeight);
+
+    for (int layer = 0; layer <= NUM_HIDDEN_LAYERS; layer++) {
+        int currSize = (layer == NUM_HIDDEN_LAYERS) ? outputSize : HIDDEN_SIZE;
+        int prevSize = (layer == 0) ? featureSize : HIDDEN_SIZE;
+
+        elementWiseBinary(hiddenWeights[layer], gradWeights[layer], hiddenWeights[layer], prevSize, currSize, updateWeight);
+        elementWiseBinary(bias[layer], gradBias[layer], bias[layer], currSize, 1, updateWeight);
     }
 
     for (int i = 0; i <= NUM_HIDDEN_LAYERS; i++) {
@@ -662,6 +636,8 @@ void backward(double* input, double* output, double* targetLabels, double** hidd
     free(gradBias);
     free(gradOutput);
 }
+
+
 
 double calculateCrossEntropyLoss(double* output, double* trueLabels, int sampleSize, int numClasses) {
     double totalLoss = 0.0f;
@@ -674,7 +650,7 @@ double calculateCrossEntropyLoss(double* output, double* trueLabels, int sampleS
         }
         totalLoss += sampleLoss;
     }
-    return totalLoss / sampleSize;
+    return totalLoss;
 }
 
 double calculateAccuracy(double* output, double* trueLabels, int sampleSize, int numClasses) {
@@ -682,7 +658,7 @@ double calculateAccuracy(double* output, double* trueLabels, int sampleSize, int
     for (int sampleIdx = 0; sampleIdx < sampleSize; sampleIdx++) {
         int truth = (int)trueLabels[sampleIdx];
         double maxPred = 0.0f;
-        int label = 0;
+        int label = -1;
         for (int j = 0; j < numClasses; j++) {
             double pred = output[numClasses * sampleIdx + j];
             if (pred > maxPred) {
@@ -693,56 +669,53 @@ double calculateAccuracy(double* output, double* trueLabels, int sampleSize, int
         
         // DEBUG print
         // printf("\nLabel: %d - Truth: %d - Prob: %.2f\n", label, truth, maxPred);
-        // for (int i = 0; i < numClasses; i++) {
-        //     printf("%.2lf ", output[numClasses * sampleIdx + i]);
-        // }
         // _sleep(50);
         if (label == truth) {
             correct += 1;
         }
     }
-    return (correct * 1.0) / sampleSize;
+    return correct * 1.0;
 }
 
 void train(double** dataset, double* labels, double** hiddenWeights, double** bias, int epochSize, int sampleSize, int featureSize, int totalSize, int outputSize = 10) {
     double totalLoss = 0.0;
     double accuracy = 0.0f;
+
     for (int epoch = 0; epoch < epochSize; epoch++) {
-        int batchSize = 0;
+        double totalLoss = 0.0;
+        double totalAccuracy = 0.0;
+
         for (int sampleIdx = 0; sampleIdx * sampleSize < totalSize; sampleIdx++) {
-            int sampleTrueIdx = sampleIdx * sampleSize;
-            int end = (sampleTrueIdx + sampleSize) > totalSize ? totalSize - sampleTrueIdx : sampleSize;
-            double* sample = dataset[sampleTrueIdx];
-            double** activations = (double**)malloc((NUM_HIDDEN_LAYERS) * sizeof(double*));
+            int startIdx = sampleIdx * sampleSize;
+            int end = ((startIdx + sampleSize) > totalSize) ? (totalSize - startIdx) : sampleSize;
+
+            double* sample = dataset[startIdx];
+            double* batchLabels = &labels[startIdx];
+
+            double** activations = (double**)malloc(NUM_HIDDEN_LAYERS * sizeof(double*));
             for (int i = 0; i < NUM_HIDDEN_LAYERS; i++) {
                 activations[i] = allocMatrix(end, HIDDEN_SIZE);
             }
 
             double* output = allocMatrix(end, outputSize);
-            dim3 blockSize(256);
-            forward(sample, hiddenWeights, activations, bias, output, outputSize, end, true, blockSize);
-            
-            double loss = calculateCrossEntropyLoss(output, &labels[sampleTrueIdx], end, outputSize);
-            // Per batch accuracy (not total)
-            accuracy = calculateAccuracy(output, &labels[sampleTrueIdx], end, outputSize);
-            printf("Epoch %d, Batch ID %d, Loss: %.4f, Acc: %.4f\n", epoch + 1, sampleIdx + 1, loss, accuracy);
+            forward(sample, hiddenWeights, activations, bias, output, outputSize, end, true);
 
-            backward(sample, output, &labels[sampleTrueIdx], hiddenWeights, activations, bias, end, true, blockSize);
+            totalLoss += calculateCrossEntropyLoss(output, batchLabels, end, outputSize);
+            totalAccuracy += calculateAccuracy(output, batchLabels, end, outputSize);
 
+            backward(sample, output, batchLabels, hiddenWeights, activations, bias, end, true);
+
+            free(output);
             for (int i = 0; i < NUM_HIDDEN_LAYERS; i++) {
                 free(activations[i]);
             }
             free(activations);
-            free(output);
-            batchSize++;
         }
-        // Save model per epoch
-        char saveFile[64];
-        snprintf(saveFile, sizeof(saveFile), "checkpoints/wandb_%d.txt", epoch);
-        saveWANDB(hiddenWeights, bias, featureSize, saveFile);
-        if (accuracy > BEST_ACCURACY) {
-            saveWANDB(hiddenWeights, bias, featureSize, "best.txt");
-        }
+
+        totalLoss /= totalSize;
+        totalAccuracy /= totalSize;
+
+        printf("Epoch %d, Loss: %.4f, Accuracy: %.4f\n", epoch + 1, totalLoss, totalAccuracy);
     }
 
     for (int i = 0; i <= NUM_HIDDEN_LAYERS; i++) {
@@ -752,6 +725,7 @@ void train(double** dataset, double* labels, double** hiddenWeights, double** bi
     free(hiddenWeights);
     free(bias);
 }
+
 
 int main() {
     loadConfig("config.txt");
@@ -764,8 +738,8 @@ int main() {
         return 1;
     }
 
-    const int epochs = 100;
-
+    const int epochs = 1000;
+    const int batchSize = 32000;
     double** dataset = (double**)malloc(train_image_count * sizeof(double*));
     for (int i = 0; i < train_image_count; i++) {
         dataset[i] = train_images + i * image_size;
