@@ -6,6 +6,7 @@
 #include <stdlib.h>
 #include <cuda_runtime.h>
 #include <math.h>
+#include <direct.h>
 
 #define TILE_k 32
 
@@ -43,7 +44,6 @@ char TEST_IMAGE[512] = "D:/gpu_project_course/fashion/t10k-images-idx3-ubyte";
 char TEST_LABEL[512] = "D:/gpu_project_course/fashion/t10k-labels-idx1-ubyte";
 int HIDDEN_SIZE = 128;
 int OUTPUT_SIZE = 10;
-char LATEST_CHECKPOINT[512] = "None";
 char BEST_CHECKPOINT[512] = "None";
 double BEST_ACCURACY = 0.0f;
 
@@ -72,8 +72,6 @@ void setConfigValue(const char* key, const char* value) {
         HIDDEN_SIZE = atoi(value);
     } else if (strcmp(key, "OUTPUT_SIZE") == 0) {
         OUTPUT_SIZE = atoi(value);
-    } else if (strcmp(key, "LATEST_CHECKPOINT") == 0) {
-        strncpy(LATEST_CHECKPOINT, value, sizeof(LATEST_CHECKPOINT));
     } else if (strcmp(key, "BEST_CHECKPOINT") == 0) {
         strncpy(BEST_CHECKPOINT, value, sizeof(BEST_CHECKPOINT));
     }
@@ -114,8 +112,60 @@ void loadConfig(const char* filename) {
     fclose(file);
 }
 
+void modifyConfig(const char* filename, const char* key, const char* newValue) {
+    FILE *file = fopen(filename, "r");
+    if (!file) {
+        printf("Error: Unable to open file '%s'\n", filename);
+        return;
+    }
+
+    // Temporary array to store file content
+    char lines[20][512]; // Assuming the file has at most 20 lines, each line has 512 characters max
+    int line_count = 0;
+
+    // Read all lines into memory
+    while (fgets(lines[line_count], 512, file) != NULL) {
+        line_count++;
+    }
+    fclose(file);
+
+    // Search for the line with the variable to be modified
+    int variable_found = 0;
+    for (int i = 0; i < line_count; i++) {
+        char current_variable[256];
+        sscanf(lines[i], "%[^=]", current_variable);  // Extract the variable name up to the '='
+
+        // Compare with the desired variable name
+        if (strcmp(current_variable, key) == 0) {
+            variable_found = 1;
+            // Update the line with the new value
+            snprintf(lines[i], 512, "%s=%s\n", key, newValue);
+            break;
+        }
+    }
+
+    if (!variable_found) {
+        printf("Error: Variable '%s' not found in the file.\n", key);
+        return;
+    }
+
+    // Write updated content back to the file
+    file = fopen(filename, "w");
+    if (!file) {
+        printf("Error: Unable to open file for writing '%s'\n", filename);
+        return;
+    }
+
+    for (int i = 0; i < line_count; i++) {
+        fputs(lines[i], file);
+    }
+
+    fclose(file);
+    printf("Variable '%s' successfully updated to '%s'.\n", key, newValue);
+}
+
 // Write weights & biases to file
-void saveWANDB(double** hiddenWeights, double** bias, int featureSize, const char* filepath) {
+void saveWANDB(double** hiddenWeights, double** bias, int featureSize, int outputSize, const char* filepath) {
     FILE *file = fopen(filepath, "w");
     
     if (file == NULL) {
@@ -125,7 +175,7 @@ void saveWANDB(double** hiddenWeights, double** bias, int featureSize, const cha
 
     for (int i = 0; i <= NUM_HIDDEN_LAYERS; i++) {
         int prevSize = (i == 0) ? featureSize : HIDDEN_SIZE;
-        int currSize = (i == NUM_HIDDEN_LAYERS) ? OUTPUT_SIZE : HIDDEN_SIZE;
+        int currSize = (i == NUM_HIDDEN_LAYERS) ? outputSize : HIDDEN_SIZE;
         for (int j = 0; j < prevSize * currSize; j++) {
             fprintf(file, "%lf ", hiddenWeights[i][j]);
         }
@@ -133,9 +183,7 @@ void saveWANDB(double** hiddenWeights, double** bias, int featureSize, const cha
     }
 
     for (int i = 0; i <= NUM_HIDDEN_LAYERS; i++) {
-        int prevSize = (i == 0) ? featureSize : HIDDEN_SIZE;
-        int currSize = (i == NUM_HIDDEN_LAYERS) ? OUTPUT_SIZE : HIDDEN_SIZE;
-        printf("Current size: %d\n", currSize);
+        int currSize = (i == NUM_HIDDEN_LAYERS) ? outputSize : HIDDEN_SIZE;
         for (int j = 0; j < currSize; j++) {
             fprintf(file, "%lf ", bias[i][j]);
         }
@@ -145,7 +193,7 @@ void saveWANDB(double** hiddenWeights, double** bias, int featureSize, const cha
 }
 
 // Load weights & biases for testing
-void loadWANDB(double** hiddenWeights, double** bias, int featureSize, const char* filepath = nullptr) {
+void loadWANDB(double** hiddenWeights, double** bias, int featureSize, int outputSize, const char* filepath = nullptr) {
     FILE* file;
 
     // Auto-load best model
@@ -217,6 +265,30 @@ double* initRandomMatrix(int rowSize, int colSize = 1, double lower = 0.0, doubl
 void copyMatrix(double* dest, double* src, int size) {
     for (int i = 0; i < size; i++) {
         dest[i] = src[i];
+    }
+}
+
+// Initialize weights & biases
+bool initWANDB(double** hiddenWeights, double** bias, int featureSize, int outputSize, bool test) {
+    if (test) {
+        if (strcmp(BEST_CHECKPOINT, "None") != 0) {
+            loadWANDB(hiddenWeights, bias, featureSize, outputSize, BEST_CHECKPOINT);
+            printf("Loading best model for testing\n");
+        } else {
+            perror("No model found!\n");
+            return false;
+        }
+        return true;
+    } else {
+        for (int i = 0; i <= NUM_HIDDEN_LAYERS; i++) {
+            int prevSize = (i == 0) ? featureSize : HIDDEN_SIZE;
+            int currSize = (i == NUM_HIDDEN_LAYERS) ? outputSize : HIDDEN_SIZE;
+
+            hiddenWeights[i] = initRandomMatrix(prevSize, currSize, -0.5, 0.5);
+            bias[i] = initRandomMatrix(currSize, 1, -0.5, 0.5);
+            printf("Layer %d initialized: (%d, %d)\n", i, prevSize, currSize);
+        }
+        return true;
     }
 }
 
@@ -669,6 +741,9 @@ double calculateAccuracy(double* output, double* trueLabels, int sampleSize, int
         
         // DEBUG print
         // printf("\nLabel: %d - Truth: %d - Prob: %.2f\n", label, truth, maxPred);
+        // for (int i = 0; i < numClasses; i++) {
+        //     printf("%.2lf ", output[numClasses * sampleIdx + i]);
+        // }
         // _sleep(50);
         if (label == truth) {
             correct += 1;
@@ -677,10 +752,7 @@ double calculateAccuracy(double* output, double* trueLabels, int sampleSize, int
     return correct * 1.0;
 }
 
-void train(double** dataset, double* labels, double** hiddenWeights, double** bias, int epochSize, int sampleSize, int featureSize, int totalSize, int outputSize = 10) {
-    double totalLoss = 0.0;
-    double accuracy = 0.0f;
-
+void train(double** dataset, double* labels, double** hiddenWeights, double** bias, int epochSize, int sampleSize, int featureSize, int totalSize, const char* configFile, int outputSize = 10) {
     for (int epoch = 0; epoch < epochSize; epoch++) {
         double totalLoss = 0.0;
         double totalAccuracy = 0.0;
@@ -714,7 +786,16 @@ void train(double** dataset, double* labels, double** hiddenWeights, double** bi
 
         totalLoss /= totalSize;
         totalAccuracy /= totalSize;
-
+        char saveFile[256];
+        snprintf(saveFile, sizeof(saveFile), "./checkpoints/wandb_%d.txt", epoch);
+        saveWANDB(hiddenWeights, bias, featureSize, outputSize, saveFile);
+        if (totalAccuracy > BEST_ACCURACY) {
+            saveWANDB(hiddenWeights, bias, featureSize, outputSize, "best.txt");
+            modifyConfig(configFile, "BEST_CHECKPOINT", "best.txt");
+            char accuracyStr[10];
+            snprintf(accuracyStr, sizeof(accuracyStr), "%lf", totalAccuracy);
+            modifyConfig(configFile, "BEST_ACCURACY", accuracyStr);
+        }
         printf("Epoch %d, Loss: %.4f, Accuracy: %.4f\n", epoch + 1, totalLoss, totalAccuracy);
     }
 
@@ -727,8 +808,31 @@ void train(double** dataset, double* labels, double** hiddenWeights, double** bi
 }
 
 
-int main() {
-    loadConfig("config.txt");
+int main(int argc, char *argv[]) {
+    // Pass runtime arguments to choose config file or testing mode
+    // Default run also works. Example command run:
+    // ./a.exe test config.txt
+    bool test = false;
+    char configFile[256] = "config.txt";
+    if (argc > 1) {
+        if (strcmp(argv[1], "test") == 0) {
+            test = true;
+        }
+        if (argc > 2) {
+            strcpy(configFile, argv[2]);
+        }
+    }
+
+    // Create checkpoint folder
+    if (_mkdir("./checkpoints") == 0) {
+        printf("Checkpoint directory created: %s\n", "./checkpoints");
+    } else if (errno == EEXIST) {
+        printf("Directory already exists!");
+    } else {
+        perror("Error creating directory!");
+    }
+
+    loadConfig(configFile);
     int train_image_count, train_label_count;
     int image_size;
     double* train_images = readImages(TRAIN_IMAGE, &train_image_count, &image_size);
@@ -747,16 +851,21 @@ int main() {
 
     double** hiddenWeights = (double**)malloc((NUM_HIDDEN_LAYERS + 1) * sizeof(double*));
     double** bias = (double**)malloc((NUM_HIDDEN_LAYERS + 1) * sizeof(double*));
-    for (int i = 0; i <= NUM_HIDDEN_LAYERS; i++) {
-        int prevSize = (i == 0) ? image_size : HIDDEN_SIZE;
-        int currSize = (i == NUM_HIDDEN_LAYERS) ? 10 : HIDDEN_SIZE;
-
-        hiddenWeights[i] = initRandomMatrix(prevSize, currSize, -0.5, 0.5);
-        bias[i] = initRandomMatrix(currSize,1, 0.0, 0.0);
-        printf("At layer %d: (%d,%d)\n", i, prevSize, currSize);
+    // Set test = true to load weights & biases from file
+    bool check = initWANDB(hiddenWeights, bias, image_size, OUTPUT_SIZE, test);
+    if (!check) {
+        perror("Error intializing weights & biases.\nTerminating program...\n");
+        free(dataset);
+        free(train_images);
+        free(train_labels);
+        return 1;
     }
-
-    train(dataset, train_labels, hiddenWeights, bias, epochs, 5000, image_size, train_image_count);
+    if (test) {
+        // TODO: Test function
+    } else {
+        train(dataset, train_labels, hiddenWeights, bias, epochs, 5000, image_size, train_image_count, configFile);
+    }
+    
 
     free(dataset);
     free(train_images);
