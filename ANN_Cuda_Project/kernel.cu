@@ -74,6 +74,8 @@ void setConfigValue(const char* key, const char* value) {
         OUTPUT_SIZE = atoi(value);
     } else if (strcmp(key, "BEST_CHECKPOINT") == 0) {
         strncpy(BEST_CHECKPOINT, value, sizeof(BEST_CHECKPOINT));
+    } else if (strcmp(key, "BEST_ACCURACY") == 0) {
+        sscanf(value, "%f", &BEST_ACCURACY);
     }
 }
 
@@ -177,7 +179,7 @@ void saveWANDB(float** hiddenWeights, float** bias, int featureSize, int outputS
         int prevSize = (i == 0) ? featureSize : HIDDEN_SIZE;
         int currSize = (i == NUM_HIDDEN_LAYERS) ? outputSize : HIDDEN_SIZE;
         for (int j = 0; j < prevSize * currSize; j++) {
-            fprintf(file, "%lf ", hiddenWeights[i][j]);
+            fprintf(file, "%f ", hiddenWeights[i][j]);
         }
         fprintf(file, "\n");
     }
@@ -185,7 +187,7 @@ void saveWANDB(float** hiddenWeights, float** bias, int featureSize, int outputS
     for (int i = 0; i <= NUM_HIDDEN_LAYERS; i++) {
         int currSize = (i == NUM_HIDDEN_LAYERS) ? outputSize : HIDDEN_SIZE;
         for (int j = 0; j < currSize; j++) {
-            fprintf(file, "%lf ", bias[i][j]);
+            fprintf(file, "%f ", bias[i][j]);
         }
         fprintf(file, "\n");
     }
@@ -220,10 +222,9 @@ void loadWANDB(float** hiddenWeights, float** bias, int featureSize, int outputS
         int currSize = (i == NUM_HIDDEN_LAYERS) ? OUTPUT_SIZE : HIDDEN_SIZE;
         for (int j = 0; j < prevSize * currSize; j++) {
             float tmp = 0.0f;
-            fscanf(file, "%lf", &tmp);
+            fscanf(file, "%f", &tmp);
             hiddenWeights[i][j] = tmp;
         }
-        printf("________________________________________\n");
     }
 
     printf("Loading biases\n");
@@ -231,7 +232,7 @@ void loadWANDB(float** hiddenWeights, float** bias, int featureSize, int outputS
         int currSize = (i == NUM_HIDDEN_LAYERS) ? OUTPUT_SIZE : HIDDEN_SIZE;
         for (int j = 0; j < currSize; j++) {
             float tmp = 0.0f;
-            fscanf(file, "%lf", &tmp);
+            fscanf(file, "%f", &tmp);
             bias[i][j] = tmp;
         }
     }
@@ -262,7 +263,7 @@ float* initHeMatrix(int rowSize, int colSize = 1) {
     int size = rowSize * colSize;
     float* res = allocMatrix(rowSize, colSize);
 
-    float limit = sqrt(6.0f / rowSize); 
+    float limit = sqrt(2.0f / rowSize); 
 
     for (int i = 0; i < size; i++) {
         res[i] = -limit + static_cast<float>(rand()) / (static_cast<float>(RAND_MAX) / (2 * limit));
@@ -672,6 +673,15 @@ float updateWeight(float& org, float& grad) {
     return org - LR * grad;
 }
 
+float lrDecay(float beta1, float beta2, int epoch, int epochDrop) {
+    // Step decay
+    epoch = 5;
+    printf("%f ", (1.0 - powf(beta2, epoch * 1.0)));
+    printf("%f ", (1.0 - powf(beta1, epoch * 1.0)));
+    printf("%f \n", sqrt((1.0 - powf(beta2, epoch * 1.0)) / (1.0 - powf(beta1, epoch * 1.0))));
+    return LR * sqrt((1.0 - powf(beta2, epoch * 1.0)) / (1.0 - powf(beta1, epoch * 1.0)));
+}
+
 void backward(float* input, float* output, float* targetLabels, float** hiddenWeights, float** activations,
     float** bias,float** Z,float* zOutput , int batchSize, bool useDevice = false, int featureSize = 784, int outputSize = OUTPUT_SIZE) {
     // Allocate gradients
@@ -820,6 +830,9 @@ void train(float** dataset, float* labels, float** hiddenWeights, float** bias, 
         }
         totalLoss /= totalSize;
         totalAccuracy /= totalSize;
+        
+        // LR = lrDecay(beta1, beta2, epoch, epochSize);
+        // printf("Epoch %d - LR: %f\n", epoch + 1, LR);
 
         if ((epoch + 1) % step_save == 0) {
             char saveFile[256];
@@ -829,7 +842,7 @@ void train(float** dataset, float* labels, float** hiddenWeights, float** bias, 
                 saveWANDB(hiddenWeights, bias, featureSize, outputSize, "best.txt");
                 modifyConfig(configFile, "BEST_CHECKPOINT", "best.txt");
                 char accuracyStr[10];
-                snprintf(accuracyStr, sizeof(accuracyStr), "%lf", totalAccuracy);
+                snprintf(accuracyStr, sizeof(accuracyStr), "%f", totalAccuracy);
                 BEST_ACCURACY = totalAccuracy;
                 modifyConfig(configFile, "BEST_ACCURACY", accuracyStr);
             }
@@ -847,15 +860,54 @@ void train(float** dataset, float* labels, float** hiddenWeights, float** bias, 
 }
 
 
+// Test model
+void test(float** dataset, float* labels, float** hiddenWeights, float** bias, int featureSize, int batchSize, int totalSize, int outputSize = 10) {
+    double totalAccuracy = 0.0f;
+    int numBatch = (totalSize - 1) / batchSize + 1;
+    for (int batchIdx = 0; batchIdx < numBatch; batchIdx++) {
+        int startIdx = batchIdx * batchSize;
+        int end = ((startIdx + batchSize) > totalSize) ? (totalSize - startIdx) : batchSize;
+        float* batchLabels = &labels[startIdx];
+        
+        float** activations = (float**)malloc(NUM_HIDDEN_LAYERS * sizeof(float*));
+        for (int i = 0; i < NUM_HIDDEN_LAYERS; i++) {
+            activations[i] = allocMatrix(end, HIDDEN_SIZE);
+        }
+
+        float** Z = (float**)malloc(NUM_HIDDEN_LAYERS * sizeof(float*));
+        for (int i = 0; i < NUM_HIDDEN_LAYERS; i++) {
+            Z[i] = allocMatrix(end, HIDDEN_SIZE);
+        }
+
+        float* zOutput = allocMatrix(end, outputSize);
+        float* output = allocMatrix(end, outputSize);
+        forward(dataset[batchIdx], hiddenWeights, activations, bias, output,Z, zOutput, outputSize, end, true);
+
+        totalAccuracy += calculateAccuracy(output, batchLabels, end, outputSize);
+
+        free(output);
+        free(zOutput);
+        for (int i = 0; i < NUM_HIDDEN_LAYERS; i++) {
+            free(activations[i]);
+            free(Z[i]);
+        }
+        free(activations);
+        free(Z);
+
+    }
+    totalAccuracy /= totalSize;
+    printf("Total accuracy: %f\n", totalAccuracy);
+}
+
 int main(int argc, char *argv[]) {
     // Pass runtime arguments to choose config file or testing mode
     // Default run also works. Example command run:
     // ./a.exe test config.txt
-    bool test = false;
+    bool runTest = false;
     char configFile[256] = "config.txt";
     if (argc > 1) {
         if (strcmp(argv[1], "test") == 0) {
-            test = true;
+            runTest = true;
         }
         if (argc > 2) {
             strcpy(configFile, argv[2]);
@@ -872,7 +924,7 @@ int main(int argc, char *argv[]) {
     }
 
     loadConfig(configFile);
-    int train_image_count, train_label_count;
+    int train_image_count, train_label_count, test_image_count, test_label_count;
     int image_size;
 
     const int epochs = 1000;
@@ -880,75 +932,58 @@ int main(int argc, char *argv[]) {
 
     float** hiddenWeights = (float**)malloc((NUM_HIDDEN_LAYERS + 1) * sizeof(float*));
     float** bias = (float**)malloc((NUM_HIDDEN_LAYERS + 1) * sizeof(float*));
-    float** train_images = readImages(TRAIN_IMAGE, &train_image_count, &image_size, batchSize);
-    float* train_labels = readLabels(TRAIN_LABEL, &train_label_count);
-    if (!train_images || !train_labels) {
-        printf("Failed to load Fashion MNIST data.\n");
-        return 1;
-    }
+    
+    // Set runTest = true to load weights & biases from file
+    if (runTest) {
+        float** test_images = readImages(TEST_IMAGE, &test_image_count, &image_size, batchSize);
+        float* test_labels = readLabels(TEST_LABEL, &test_label_count);
+        if (!test_images || !test_labels) {
+            printf("Failed to load Fashion MNIST training data.\n");
+            return 1;
+        }
+        for (int i = 0; i <= NUM_HIDDEN_LAYERS; i++) {
+            int prevSize = (i == 0) ? image_size : HIDDEN_SIZE;
+            int currSize = (i == NUM_HIDDEN_LAYERS) ? OUTPUT_SIZE : HIDDEN_SIZE;
 
-    // Set test = true to load weights & biases from file
-    bool check = initWANDB(hiddenWeights, bias, image_size, OUTPUT_SIZE, test);
-    if (!check) {
-        perror("Error intializing weights & biases.\nTerminating program...\n");
+            hiddenWeights[i] = initRandomMatrix(prevSize, currSize, -0.5, 0.5);
+            bias[i] = initRandomMatrix(currSize,1, 0.0, 0.0);
+            printf("At layer %d: (%d,%d)\n", i, prevSize, currSize);
+        }
+        bool check = initWANDB(hiddenWeights, bias, image_size, OUTPUT_SIZE, runTest);
+        if (!check) {
+            perror("Error intializing weights & biases.\nTerminating program...\n");
+            free(test_images);
+            free(test_labels);
+            return 1;
+        }
+        
+        test(test_images, test_labels, hiddenWeights, bias, image_size, batchSize, test_image_count,10);
+        for (int i = 0; i < (test_image_count - 1 / batchSize) + 1; i++) {
+            free(test_images[i]);
+        }
+        free(test_images);
+        free(test_labels);
+    } else {
+        float** train_images = readImages(TRAIN_IMAGE, &train_image_count, &image_size, batchSize);
+        float* train_labels = readLabels(TRAIN_LABEL, &train_label_count);
+        if (!train_images || !train_labels) {
+            printf("Failed to load Fashion MNIST training data.\n");
+            return 1;
+        }
+        bool check = initWANDB(hiddenWeights, bias, image_size, OUTPUT_SIZE, runTest);
+        if (!check) {
+            perror("Error intializing weights & biases.\nTerminating program...\n");
+            free(train_images);
+            free(train_labels);
+            return 1;
+        }
+
+        train(train_images, train_labels, hiddenWeights, bias, epochs, batchSize, image_size, train_image_count, configFile,10);
+        for (int i = 0; i < (train_image_count - 1 / batchSize) + 1; i++) {
+            free(train_images[i]);
+        }
         free(train_images);
         free(train_labels);
-        return 1;
     }
-    
-    if (test) {
-        // TODO: Test function
-    } else {
-        train(train_images, train_labels, hiddenWeights, bias, epochs, batchSize, image_size, train_image_count, configFile,10);
-    }
-    
-    for (int i = 0; i < (train_image_count - 1 / batchSize) + 1; i++) {
-        free(train_images[i]);
-    }
-    free(train_images);
-    free(train_labels);
-
-    // Test matrix multiplication
-    // float a[6] = {2, 3, 4, 5, 6, 7};
-    // float b[6] = {7, 8, 9, 10, 11, 12};
-    // float c[9];
-    // float real_c[9];
-    // matrixMultiplication(a, 3, 2, b, 3, c, false);
-    // matrixMultiplication(a, 3, 2, b, 3, real_c, false);
-    // printMatrix(c, 3, 3);
-    // printMatrix(real_c, 3, 3);
-
-    // Test loss function
-    // float a[20] = {0.10, 0.09, 0.11, 0.09, 0.10, 0.10, 0.10, 0.10, 0.11, 0.10, 0.09, 0.11, 0.09, 0.10, 0.10, 0.10, 0.10, 0.11};
-    // float b[2] = {0, 2};
-    // printf("%.2lf", calculateCrossEntropyLoss(a, b, 2, 10));
-
-    // Test softmax
-    // float a[5] = {1.3, 5.1, 2.2, 0.7, 1.1};
-    // softmax(a, 5);
-    // for (int i = 0; i < 5; i++) {
-    //     printf("%.2lf ", a[i]);
-    // }
-
-    // Test accuracy
-    // float a[20] = {0.10, 0.09, 0.11, 0.09, 0.10, 0.10, 0.10, 0.10, 0.11, 0.10, 
-    //                 0.10, 0.09, 0.11, 0.09, 0.10, 0.10, 0.10, 0.10, 0.11, 0.10};
-    // float b[2] = {0, 2};
-    // printf("%.2lf", calculateAccuracy(a, b, 2, 10));
-
-    // Test load/save weights
-    // float** hiddenWeights = (float**)malloc((NUM_HIDDEN_LAYERS + 1) * sizeof(float*));
-    // float** bias = (float**)malloc((NUM_HIDDEN_LAYERS + 1) * sizeof(float*));
-    // for (int i = 0; i <= NUM_HIDDEN_LAYERS; i++) {
-    //     int prevSize = (i == 0) ? 784 : HIDDEN_SIZE;
-    //     int currSize = (i == NUM_HIDDEN_LAYERS) ? 10 : HIDDEN_SIZE;
-
-    //     hiddenWeights[i] = initRandomMatrix(prevSize, currSize, -0.5, 0.5);
-    //     bias[i] = initRandomMatrix(currSize,1, 0.0, 0.0);
-    //     printf("At layer %d: (%d,%d)\n", i, prevSize, currSize);
-    // }
-    // loadWANDB(hiddenWeights, bias, 784, "wandb.txt");
-    // printf("Finished loading\n");
-    // saveWANDB(hiddenWeights, bias, 784, "test.txt");
     return 0;
 }
