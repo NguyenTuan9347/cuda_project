@@ -2,7 +2,7 @@
 <Project>
   <ProjectOutputs>
     <ProjectOutput>
-      <FullPath>D:\gpu_project_course\ANN_Cuda_Project\x64\Debug\ANN_Cuda_Project.exe</FullPath>
+      <FullPath>D:\cuda_project\ANN_Cuda_Project\x64\Debug\ANN_Cuda_Project.exe</FullPath>
     </ProjectOutput>
   </ProjectOutputs>
   <ContentFiles />

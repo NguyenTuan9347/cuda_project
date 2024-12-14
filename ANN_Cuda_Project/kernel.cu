@@ -37,11 +37,11 @@ int MAX_IMAGESIZE = 784;  // 28x28 flattened size
 int NUM_TRAIN = 60000;
 int NUM_TEST = 10000;
 int SIZE = 784;
-float LR = 0.1;
-char TRAIN_IMAGE[512] = "D:/gpu_project_course/fashion/train-images-idx3-ubyte";
-char TRAIN_LABEL[512] = "D:/gpu_project_course/fashion/train-labels-idx1-ubyte";
-char TEST_IMAGE[512] = "D:/gpu_project_course/fashion/t10k-images-idx3-ubyte";
-char TEST_LABEL[512] = "D:/gpu_project_course/fashion/t10k-labels-idx1-ubyte";
+float LR = 1e-4;
+char TRAIN_IMAGE[512] = "D:/cuda_project/fashion/train-images-idx3-ubyte";
+char TRAIN_LABEL[512] = "D:/cuda_project/fashion/train-labels-idx1-ubyte";
+char TEST_IMAGE[512] = "D:/cuda_project/fashion/t10k-images-idx3-ubyte";
+char TEST_LABEL[512] = "D:/cuda_project/fashion/t10k-labels-idx1-ubyte";
 int HIDDEN_SIZE = 128;
 int OUTPUT_SIZE = 10;
 char BEST_CHECKPOINT[512] = "None";
@@ -482,15 +482,6 @@ void softmax(float* input, float* output, int batchSize, int outputSize) {
     }
 }
 
-/*
-    n is batch size
-    d is 728
-    Input size : n x d
-
-
-*/
-
-
 __global__ void matrixMultiKernel(float* A, float* B, float* C, int m, int n, int k) {
     __shared__ float s_A[TILE_k][TILE_k];
     __shared__ float s_B[TILE_k][TILE_k];
@@ -669,12 +660,27 @@ void forward(float* input, float** hiddenWeights, float** activations, float** b
 }
 
 
+float decayedLR(float orgLR, float decayRate, int step, int decaySteps){
+    return orgLR * (float)pow(decayRate, ((step * 1.0)/ decaySteps));
+}
+
+float jumpDecay(int step) {
+    if (step >= 50) {
+        return 0.00001;
+    }
+    else if (step >= 25) {
+        return 0.00005;
+    }
+    else {
+        return 0.0001;
+    }
+}
+
 float updateWeight(float& org, float& grad) {
     return org - LR * grad;
 }
 
 float lrDecay(float beta1, float beta2, int epoch, int epochDrop) {
-    // Step decay
     epoch = 5;
     printf("%f ", (1.0 - powf(beta2, epoch * 1.0)));
     printf("%f ", (1.0 - powf(beta1, epoch * 1.0)));
@@ -769,27 +775,19 @@ float calculateAccuracy(float* output, float* trueLabels, int batchSize, int num
         for (int j = 0; j < numClasses; j++) {
             label = (output[batchIdx * numClasses + j] > output[batchIdx * numClasses +  label]) ? j : label;
         }
-        
-        // DEBUG print
-      /*   printf("\nLabel: %d - Truth: %d - Prob: %.2f\n", label, truth, output[batchIdx * numClasses + label]);
-         for (int i = 0; i < numClasses; i++) {
-             printf("%.2lf ", output[numClasses * batchIdx + i]);
-         }
-         _sleep(50);*/
         if (label == truth) {
             correct += 1;
         }
         labels[label] += 1;
     }
-
-    //for (int i = 0; i < numClasses; i++) {
-    //    printf("Guess label %d for %d times, ", i, labels[i]);
-    //}
-    //printf("\n");
     return correct * 1.0;
 }
 
 void train(float** dataset, float* labels, float** hiddenWeights, float** bias, int epochSize, int batchSize, int featureSize, int totalSize, const char* configFile,int step_save = 5, int outputSize = 10) {
+    int decaySteps = 100000;
+    float decayRate = 0.9995;
+    int steps = 0;
+
     for (int epoch = 0; epoch < epochSize; epoch++) {
         double totalLoss = 0.0;
         double totalAccuracy = 0.0;
@@ -817,6 +815,7 @@ void train(float** dataset, float* labels, float** hiddenWeights, float** bias, 
             totalAccuracy += calculateAccuracy(output, batchLabels, end, outputSize);
 
             backward(dataset[batchIdx], output, batchLabels, hiddenWeights, activations, bias, Z, zOutput, end, true);
+            steps++;
 
             free(output);
             free(zOutput);
@@ -826,12 +825,12 @@ void train(float** dataset, float* labels, float** hiddenWeights, float** bias, 
             }
             free(activations);
             free(Z);
-
         }
+
         totalLoss /= totalSize;
         totalAccuracy /= totalSize;
-        
-        // LR = lrDecay(beta1, beta2, epoch, epochSize);
+        LR = decayedLR(LR, decayRate, steps, decaySteps);
+       // LR = lrDecay(beta1, beta2, epoch, epochSize);
         // printf("Epoch %d - LR: %f\n", epoch + 1, LR);
 
         if ((epoch + 1) % step_save == 0) {
@@ -928,7 +927,7 @@ int main(int argc, char *argv[]) {
     int image_size;
 
     const int epochs = 1000;
-    const int batchSize = 320;
+    const int batchSize = 32 * 5;
 
     float** hiddenWeights = (float**)malloc((NUM_HIDDEN_LAYERS + 1) * sizeof(float*));
     float** bias = (float**)malloc((NUM_HIDDEN_LAYERS + 1) * sizeof(float*));
@@ -979,7 +978,9 @@ int main(int argc, char *argv[]) {
         }
 
         train(train_images, train_labels, hiddenWeights, bias, epochs, batchSize, image_size, train_image_count, configFile,10);
-        for (int i = 0; i < (train_image_count - 1 / batchSize) + 1; i++) {
+        int numBatch = (train_image_count - 1) / batchSize + 1;
+
+        for (int i = 0; i < numBatch; i++) {
             free(train_images[i]);
         }
         free(train_images);
