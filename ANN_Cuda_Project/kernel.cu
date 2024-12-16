@@ -8,7 +8,7 @@
 #include <math.h>
 #include <direct.h>
 
-#define TILE_k 32
+#define TILE_K 32
 
 
 #define CHECK(call)\
@@ -483,24 +483,24 @@ void softmax(float* input, float* output, int batchSize, int outputSize) {
 }
 
 __global__ void matrixMultiKernel(float* A, float* B, float* C, int m, int n, int k) {
-    __shared__ float s_A[TILE_k][TILE_k];
-    __shared__ float s_B[TILE_k][TILE_k];
+    __shared__ float s_A[TILE_K][TILE_K];
+    __shared__ float s_B[TILE_K][TILE_K];
 
     int row = blockIdx.y * blockDim.y + threadIdx.y;
     int col = blockIdx.x * blockDim.x + threadIdx.x;
 
     float s = 0.0f;
 
-    for (int batch_idx = 0; batch_idx < (n + TILE_k - 1) / TILE_k; batch_idx++) {
-        int A_col = batch_idx * TILE_k + threadIdx.x;
-        int B_row = batch_idx * TILE_k + threadIdx.y;
+    for (int batch_idx = 0; batch_idx < (n + TILE_K - 1) / TILE_K; batch_idx++) {
+        int A_col = batch_idx * TILE_K + threadIdx.x;
+        int B_row = batch_idx * TILE_K + threadIdx.y;
 
         s_A[threadIdx.y][threadIdx.x] = (row < m && A_col < n) ? A[row * n + A_col] : 0.0f;
         s_B[threadIdx.y][threadIdx.x] = (col < k && B_row < n) ? B[B_row * k + col] : 0.0f;
 
         __syncthreads();
 
-        for (int i = 0; i < TILE_k; i++) {
+        for (int i = 0; i < TILE_K; i++) {
             s += s_A[threadIdx.y][i] * s_B[i][threadIdx.x];
         }
 
@@ -545,7 +545,26 @@ void matrixMultiplication(float* A, int m, int n, float* B, int k, float* C, boo
     }
 }
 
-float* transpose(float* matrix, int rowSize, int colSize, bool useDevice = false) {
+__global__ void transpose_kernel(float* input, float* output, int iRowSize, int iColSize)
+{
+    __shared__ float s_blkData[TILE_K][TILE_K + 1];
+
+    int iR = blockIdx.x * blockDim.x + threadIdx.x;
+    int iC = blockIdx.y * blockDim.y + threadIdx.y;
+    if (iR < iRowSize && iC < iColSize) {
+        s_blkData[threadIdx.x][threadIdx.y] = input[iR * iColSize + iC];
+    }
+
+    __syncthreads();
+        
+    int oR = blockIdx.y * blockDim.y + threadIdx.y;
+    int oC = blockIdx.x * blockDim.x + threadIdx.x;
+    if (oR < iColSize && oC < iRowSize) {
+        output[oR * iRowSize + oC] = s_blkData[threadIdx.x][threadIdx.y];
+    }
+}
+
+float* transpose(float* matrix, int rowSize, int colSize, bool useDevice = false, dim3 blockSize = dim3(1)) {
     float* output = allocMatrix(colSize, rowSize);
     if (!useDevice) {
         for (int i = 0; i < rowSize; i++) {
@@ -555,6 +574,25 @@ float* transpose(float* matrix, int rowSize, int colSize, bool useDevice = false
                 output[transposedIdx] = matrix[matrixIdx];
             }
         }
+    }
+    else {
+        float* d_in, * d_out;
+        size_t nBytes = rowSize * colSize * sizeof(float);
+        CHECK(cudaMalloc(&d_in, nBytes));
+        CHECK(cudaMalloc(&d_out, nBytes));
+
+        CHECK(cudaMemcpy(d_in, matrix, nBytes, cudaMemcpyHostToDevice));
+
+        dim3 gridSize((colSize - 1) / blockSize.x + 1, (rowSize - 1) / blockSize.y + 1);
+
+        transpose_kernel<< <gridSize, blockSize >> > (d_in, d_out, rowSize,colSize);
+
+        CHECK(cudaDeviceSynchronize();)
+        CHECK(cudaMemcpy(output, d_out, nBytes, cudaMemcpyDeviceToHost));
+
+        CHECK(cudaFree(d_in));
+        CHECK(cudaFree(d_out));
+
     }
     return output;
 }
@@ -712,7 +750,7 @@ void backward(float* input, float* output, float* targetLabels, float** hiddenWe
         int currSize = (layer == NUM_HIDDEN_LAYERS) ? outputSize : HIDDEN_SIZE;
         int prevSize = (layer == 0) ? featureSize : HIDDEN_SIZE;
 
-        float* activationsTransposed = (layer == 0) ? transpose(input, batchSize, featureSize) : transpose(activations[layer - 1], batchSize, prevSize);
+        float* activationsTransposed = (layer == 0) ? transpose(input, batchSize, featureSize,useDevice, blockSize) : transpose(activations[layer - 1], batchSize, prevSize, useDevice, blockSize);
 
         matrixMultiplication(activationsTransposed, prevSize, batchSize, gradientToLoss, currSize, gradWeights[layer], useDevice, blockSize);
       
@@ -721,7 +759,7 @@ void backward(float* input, float* output, float* targetLabels, float** hiddenWe
 
         if (layer == 0) break;
 
-        float* weightsTransposed = transpose(hiddenWeights[layer], prevSize, currSize);
+        float* weightsTransposed = transpose(hiddenWeights[layer], prevSize, currSize, useDevice, blockSize);
         float* previousGradient = allocMatrix(batchSize, prevSize);
 
         matrixMultiplication(gradientToLoss, batchSize, currSize, hiddenWeights[layer], prevSize, previousGradient, useDevice, blockSize);
@@ -931,7 +969,6 @@ int main(int argc, char *argv[]) {
 
     float** hiddenWeights = (float**)malloc((NUM_HIDDEN_LAYERS + 1) * sizeof(float*));
     float** bias = (float**)malloc((NUM_HIDDEN_LAYERS + 1) * sizeof(float*));
-    
     // Set runTest = true to load weights & biases from file
     if (runTest) {
         float** test_images = readImages(TEST_IMAGE, &test_image_count, &image_size, batchSize);
@@ -962,7 +999,8 @@ int main(int argc, char *argv[]) {
         }
         free(test_images);
         free(test_labels);
-    } else {
+    } 
+    else {
         float** train_images = readImages(TRAIN_IMAGE, &train_image_count, &image_size, batchSize);
         float* train_labels = readLabels(TRAIN_LABEL, &train_label_count);
         if (!train_images || !train_labels) {
@@ -986,5 +1024,6 @@ int main(int argc, char *argv[]) {
         free(train_images);
         free(train_labels);
     }
+
     return 0;
 }
