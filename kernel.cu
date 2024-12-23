@@ -499,24 +499,64 @@ float** readImages(const char* path, int* num_images, int* image_size, int batch
     return images;
 }
 
-void softmax(float* input, float* output, int batchSize, int outputSize) {
-    for (int batchIdx = 0; batchIdx < batchSize; batchIdx++) {
-        int buffer = batchIdx * outputSize;
+__global__ void softmaxKernel(float* d_in, float* d_out, int batchSize, int outputSize) {
+    int idx = blockDim.x * blockIdx.x + threadIdx.x;
+    if (idx < batchSize) {
+        int buffer = idx * outputSize;
 
-        float max_val = input[buffer];
+        float max_val = d_in[buffer];
         for (int i = 1; i < outputSize; i++) {
-            max_val = fmax(max_val, input[buffer + i]);
+            max_val = max_val >= d_in[buffer + i] ? max_val : d_in[buffer + i] ;
         }
 
-        float sum = 0.0;
+        float sum = 0.0f;
         for (int i = 0; i < outputSize; i++) {
-            output[buffer + i] = exp(input[buffer + i] - max_val);
-            sum += output[buffer + i];
+            d_out[buffer + i] = __expf(d_in[buffer + i] - max_val);
+            sum += d_out[buffer + i];
         }
 
         for (int i = 0; i < outputSize; i++) {
-            output[buffer + i] /= sum;
+            d_out[buffer + i] /= sum;
         }
+    }
+}
+
+
+void softmax(float* input, float* output, int batchSize, int outputSize, bool useDevice, dim3 blockSize) {
+    if(!useDevice){    
+        for (int batchIdx = 0; batchIdx < batchSize; batchIdx++) {
+            int buffer = batchIdx * outputSize;
+
+            float max_val = input[buffer];
+            for (int i = 1; i < outputSize; i++) {
+                max_val = fmax(max_val, input[buffer + i]);
+            }
+
+            float sum = 0.0;
+            for (int i = 0; i < outputSize; i++) {
+                output[buffer + i] = expf(input[buffer + i] - max_val);
+                sum += output[buffer + i];
+            }
+
+            for (int i = 0; i < outputSize; i++) {
+                output[buffer + i] /= sum;
+            }
+        }
+    } else {
+        int eleSize = batchSize * outputSize; 
+        float* d_in, * d_out;
+        CHECK(cudaMalloc((void**)&d_in, eleSize * sizeof(float)));
+        CHECK(cudaMalloc((void**)&d_out, eleSize* sizeof(float)));
+
+        CHECK(cudaMemcpy(d_in, input, eleSize * sizeof(float), cudaMemcpyHostToDevice));
+        blockSize = dim3(32); // Because working on a 1D grid it better to do this way
+        dim3 gridSize((batchSize + blockSize.x - 1) / blockSize.x);
+        softmaxKernel<<<gridSize, blockSize>>>(d_in, d_out, batchSize, outputSize);
+
+        CHECK(cudaMemcpy(output, d_out, eleSize * sizeof(float), cudaMemcpyDeviceToHost));
+
+        cudaFree(d_in);
+        cudaFree(d_out);
     }
 }
 
@@ -786,7 +826,7 @@ void forward(float* input, float** hiddenWeights, float** activations, float** b
         elementWiseBinary(&zOutput[j * outputSize], bias[NUM_HIDDEN_LAYERS], &zOutput[j * outputSize], outputSize, 1, addition);
     }
 
-    softmax(zOutput, output, batchSize, outputSize);
+    softmax(zOutput, output, batchSize, outputSize,useDevice, blockSize);
 }
 
 
@@ -1038,7 +1078,7 @@ int main(int argc, char *argv[]) {
     loadConfig(configFile);
     int train_image_count, train_label_count, test_image_count, test_label_count;
     int image_size;
-    bool useDevice = false;
+    bool useDevice = true;
     const int epochs = 3;
     const int batchSize = 32 * 5;
 
