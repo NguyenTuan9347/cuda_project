@@ -550,7 +550,7 @@ void softmax(float* input, float* output, int batchSize, int outputSize, bool us
 
         CHECK(cudaMemcpy(d_in, input, eleSize * sizeof(float), cudaMemcpyHostToDevice));
         blockSize = dim3(32); // Because working on a 1D grid it better to do this way
-        dim3 gridSize((batchSize + blockSize.x - 1) / blockSize.x);
+        dim3 gridSize((batchSize- 1) / blockSize.x + 1);
         softmaxKernel<<<gridSize, blockSize>>>(d_in, d_out, batchSize, outputSize);
 
         CHECK(cudaMemcpy(output, d_out, eleSize * sizeof(float), cudaMemcpyDeviceToHost));
