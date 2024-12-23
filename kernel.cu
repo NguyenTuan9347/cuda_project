@@ -591,6 +591,87 @@ __global__ void matrixMultiKernel(float* A, float* B, float* C, int m, int n, in
 }
 
 
+__global__ void updateWeightKernel(float* hiddenWeight, float* grad, int rowSize, int colSize,float d_LR) {
+    int i = blockIdx.y * blockDim.y + threadIdx.y;
+    int j = blockIdx.x * blockDim.x + threadIdx.x;
+    int idx = i * colSize + j;
+
+    if (i < rowSize && j < colSize) {
+        hiddenWeight[idx] -= d_LR * grad[idx];
+    }
+}
+
+void initUpdateStream(cudaStream_t* stream, float* hiddenWeight, float* grad, float* d_hiddenWeight, float* d_grad, int rowSize, int colSize, dim3 blockSize, float LR) {
+    CHECK(cudaStreamCreate(stream));
+    
+    int totalSize = rowSize * colSize;
+            
+    CHECK(cudaMemcpyAsync(d_hiddenWeight, hiddenWeight, totalSize * sizeof(float), cudaMemcpyHostToDevice, *stream));
+    CHECK(cudaMemcpyAsync(d_grad, grad, totalSize * sizeof(float), cudaMemcpyHostToDevice, *stream));
+
+    dim3 gridSize((colSize + blockSize.x - 1) / blockSize.x, (rowSize + blockSize.y - 1) / blockSize.y);
+
+    updateWeightKernel<<<gridSize, blockSize, 0, *stream>>>(d_hiddenWeight, d_grad, rowSize, colSize, LR);
+
+    CHECK(cudaMemcpyAsync(hiddenWeight, d_hiddenWeight, totalSize * sizeof(float), cudaMemcpyDeviceToHost, *stream));
+
+}
+
+void updateWeights(float** hiddenWeights, float** grads, int featureSize, int outputSize, float LR, bool isUpdateWeight, bool useDevice = false, dim3 blockSize = dim3(1)) {
+    if (!useDevice) {
+        for (int layer = 0; layer <= NUM_HIDDEN_LAYERS; layer++) {
+            int currSize = (layer == NUM_HIDDEN_LAYERS) ? outputSize : HIDDEN_SIZE;
+            int prevSize = (layer == 0) ? featureSize : HIDDEN_SIZE;
+
+             if(!isUpdateWeight) { // to update bias also
+                prevSize = currSize;
+                currSize = 1;
+            }
+            
+            float* hiddenWeight = hiddenWeights[layer];
+            float* grad = grads[layer];
+
+            for (int i = 0; i < prevSize; i++) {
+                for (int j = 0; j < currSize; j++) {
+                    int idx = i * currSize + j;
+                    hiddenWeight[idx] -= LR * grad[idx];
+                }
+            }
+        }
+    } else {
+        int nStreams = NUM_HIDDEN_LAYERS + 1;
+
+        cudaStream_t* streams = (cudaStream_t*)malloc(nStreams * sizeof(cudaStream_t));
+        float** d_hiddenWeights = (float**)malloc(nStreams * sizeof(float*));
+        float** d_grads = (float**)malloc(nStreams * sizeof(float*));
+
+        for (int layer = 0; layer <= NUM_HIDDEN_LAYERS; layer++) {
+            int currSize = (layer == NUM_HIDDEN_LAYERS) ? outputSize : HIDDEN_SIZE;
+            int prevSize = (layer == 0) ? featureSize : HIDDEN_SIZE;
+            if(!isUpdateWeight) { // to update bias also
+                prevSize = currSize;
+                currSize = 1;
+            }
+
+            CHECK(cudaMalloc((void**)&d_hiddenWeights[layer], currSize * prevSize * sizeof(float)));
+            CHECK(cudaMalloc((void**)&d_grads[layer], prevSize * currSize * sizeof(float)));
+            initUpdateStream(&streams[layer], hiddenWeights[layer], grads[layer], d_hiddenWeights[layer], d_grads[layer], prevSize, currSize, blockSize, LR);
+        }
+
+        for (int layer = 0; layer <= NUM_HIDDEN_LAYERS; layer++) {
+            CHECK(cudaStreamSynchronize(streams[layer]));
+            CHECK(cudaFree(d_hiddenWeights[layer]));
+            CHECK(cudaFree(d_grads[layer]));
+            CHECK(cudaStreamDestroy(streams[layer]));
+        }
+        
+        free(streams);
+        free(d_hiddenWeights);
+        free(d_grads);
+    }
+}
+
+
 void matrixMultiplication(float* A, int m, int n, float* B, int k, float* C, bool useDevice = false, dim3 blockSize = dim3(16, 16)) {
     if (!useDevice) {
         for (int i = 0; i < m; i++) {
@@ -742,42 +823,33 @@ __global__ void reluKernel(float* a, float* c, int totalSize) {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
 
     if (idx < totalSize) {
-        // Apply ReLU directly
         c[idx] = a[idx] > 0.0f ? a[idx] : 0.0f;
     }
 }
 
 void applyRelu(float* a, float* c, int rowSize, int colSize, bool useDevice = false, dim3 blockSize = dim3(1)) {
     if (!useDevice) {
-        // CPU execution
         for (int i = 0; i < rowSize; i++) {
             for (int j = 0; j < colSize; j++) {
                 int idx = i * colSize + j;
-                c[idx] = a[idx] > 0.0f ? a[idx] : 0.0f; // Apply ReLU on CPU
+                c[idx] = a[idx] > 0.0f ? a[idx] : 0.0f;
             }
         }
     } else {
-        // GPU execution
         int totalSize = rowSize * colSize;
         float* d_a, *d_c;
 
-        // Allocate device memory
         CHECK(cudaMalloc((void**)&d_a, totalSize * sizeof(float)));
         CHECK(cudaMalloc((void**)&d_c, totalSize * sizeof(float)));
 
-        // Copy input data to device
         cudaMemcpy(d_a, a, totalSize * sizeof(float), cudaMemcpyHostToDevice);
 
-        // Configure the kernel launch
         int gridSize = (totalSize + blockSize.x - 1) / blockSize.x;
 
-        // Launch the kernel
         reluKernel<<<gridSize, blockSize>>>(d_a, d_c, totalSize);
 
-        // Copy the result back to host
         cudaMemcpy(c, d_c, totalSize * sizeof(float), cudaMemcpyDeviceToHost);
 
-        // Free device memory
         cudaFree(d_a);
         cudaFree(d_c);
     }
@@ -832,10 +904,6 @@ void forward(float* input, float** hiddenWeights, float** activations, float** b
 
 float decayedLR(float orgLR, float decayRate, int step, int decaySteps){
     return orgLR * (float)pow(decayRate, ((step * 1.0)/ decaySteps));
-}
-
-float updateWeight(float& org, float& grad) {
-    return org - LR * grad;
 }
 
 float lrDecay(float beta1, float beta2, int epoch, int epochDrop) {
@@ -895,13 +963,8 @@ void backward(float* input, float* output, float* targetLabels, float** hiddenWe
         gradientToLoss = previousGradient;
     }
 
-    for (int layer = 0; layer <= NUM_HIDDEN_LAYERS; layer++) {
-        int currSize = (layer == NUM_HIDDEN_LAYERS) ? outputSize : HIDDEN_SIZE;
-        int prevSize = (layer == 0) ? featureSize : HIDDEN_SIZE;
-
-        elementWiseBinary(hiddenWeights[layer], gradWeights[layer], hiddenWeights[layer], prevSize, currSize, updateWeight);
-        elementWiseBinary(bias[layer], gradBias[layer], bias[layer], currSize, 1, updateWeight);
-    }
+    updateWeights(hiddenWeights, gradWeights, featureSize, outputSize, LR, true, useDevice, blockSize);
+    updateWeights(bias, gradBias, featureSize, outputSize, LR, false, useDevice, blockSize);
 
     for (int i = 0; i <= NUM_HIDDEN_LAYERS; i++) {
         freeMatrix(gradWeights[i]);
@@ -1078,9 +1141,9 @@ int main(int argc, char *argv[]) {
     loadConfig(configFile);
     int train_image_count, train_label_count, test_image_count, test_label_count;
     int image_size;
-    bool useDevice = true;
+    bool useDevice = false;
     const int epochs = 3;
-    const int batchSize = 32 * 5;
+    const int batchSize = 32 * 10;
 
     float** hiddenWeights = (float**)malloc((NUM_HIDDEN_LAYERS + 1) * sizeof(float*));
     float** bias = (float**)malloc((NUM_HIDDEN_LAYERS + 1) * sizeof(float*));
