@@ -6,10 +6,46 @@
 #include <stdlib.h>
 #include <cuda_runtime.h>
 #include <math.h>
-#include <direct.h>
 
 #define TILE_K 32
 
+
+struct GpuTimer
+{
+	cudaEvent_t start;
+	cudaEvent_t stop;
+
+	GpuTimer()
+	{
+		cudaEventCreate(&start);
+		cudaEventCreate(&stop);
+	}
+
+	~GpuTimer()
+	{
+		cudaEventDestroy(start);
+		cudaEventDestroy(stop);
+	}
+
+	void Start()
+	{
+		cudaEventRecord(start, 0);                                                                 
+		cudaEventSynchronize(start);
+	}
+
+	void Stop()
+	{
+		cudaEventRecord(stop, 0);
+	}
+
+	float Elapsed()
+	{
+		float elapsed;
+		cudaEventSynchronize(stop);
+		cudaEventElapsedTime(&elapsed, start, stop);
+		return elapsed;
+	}
+};
 
 #define CHECK(call)\
 {\
@@ -406,11 +442,13 @@ void displayImg(const float* image, int rows, int cols) {
     }
 }
 
+//Check if the image is valid or not
 void displayBlank(const float* image, int rows, int cols) {
     for (int r = 0; r < rows; ++r) {
         for (int c = 0; c < cols; ++c) {
             float tmp = image[r * cols + c];
-        };
+            tmp += 1;
+        }
     }
 }
 
@@ -598,11 +636,6 @@ float* transpose(float* matrix, int rowSize, int colSize, bool useDevice = false
 }
 
 
-float applyRelu(float& a) {
-    return a > 0 ? a : 0;
-}
-
-
 void computeGradientForOutputLayer(float* output, float* gradOutput, float* targetLabels, int batchSize, int outputSize = 10) {
     for (int i = 0; i < batchSize; i++) {
         for (int j = 0; j < outputSize; j++) {
@@ -611,24 +644,51 @@ void computeGradientForOutputLayer(float* output, float* gradOutput, float* targ
         gradOutput[i * outputSize + (int)targetLabels[i]] -= 1.0;
     }
 }
+__global__ void computeGradBiasKernel(float* d_gradBias, float* d_gradToLoss, int batchSize, int outputSize) {
+    int colIdx = blockDim.x * blockIdx.x + threadIdx.x;
+    int rowIdx = blockDim.x * blockIdx.x + threadIdx.y;
+    if (rowIdx < batchSize && colIdx < outputSize) {
+        float addVal = d_gradToLoss[colIdx * outputSize + rowIdx];
+        atomicAdd(&d_gradBias[colIdx], addVal);
+    }
+}
 
+void computeGradientForBias(float* gradToLoss, float* gradBias, int batchSize, int outputSize, bool useDevice=false, dim3 blockSize= dim3(1)) {
+    for (int i = 0; i < outputSize; i++) {
+        gradBias[i] = 0.0;
+    }
 
-void computeGradientForBias(float* gradToLoss, float* gradBias, int batchSize, int outputSize = 10, bool useDevice = false) {
     if (!useDevice) {
-        for (int i = 0; i < outputSize; i++) {
-            gradBias[i] = 0.0;
-        }
         for (int j = 0; j < batchSize; j++) {
             for (int i = 0; i < outputSize; i++) {
                 gradBias[i] += gradToLoss[j * outputSize + i];
             }
         }
-        for (int i = 0; i < outputSize; i++) {
-            gradBias[i] /= batchSize;
-        }
+    } else {
+        int totalSize = batchSize * outputSize;
+        float* d_gradBias;
+        float* d_gradToLoss;
+
+        CHECK(cudaMalloc((void**)&d_gradBias, totalSize * sizeof(float)));
+        CHECK(cudaMalloc((void**)&d_gradToLoss, totalSize * sizeof(float)));
+
+        cudaMemcpy(d_gradBias, gradBias, totalSize * sizeof(float), cudaMemcpyHostToDevice);
+        cudaMemcpy(d_gradToLoss, gradToLoss, totalSize * sizeof(float), cudaMemcpyHostToDevice);
+
+        dim3 gridSize((batchSize - 1) / blockSize.x + 1, (outputSize - 1) / blockSize.y + 1);
+
+        computeGradBiasKernel<<<gridSize, blockSize>>>(d_gradBias, d_gradToLoss, batchSize, outputSize);
+
+        cudaMemcpy(gradBias, d_gradBias, totalSize * sizeof(float), cudaMemcpyDeviceToHost);
+
+        cudaFree(d_gradBias);
+        cudaFree(d_gradToLoss);
+    }
+
+    for (int i = 0; i < outputSize; i++) {
+        gradBias[i] /= batchSize;
     }
 }
-
 
 float retainPositive(float& org, float& dest) {
     return dest > 0 ? org : 0.0;
@@ -638,14 +698,48 @@ float multiply(float& a, float& b) {
     return a * b;
 }
 
-void elementWiseUnary(float* a, float* c, int rowSize, int colSize, float (*unary)(float&), bool useDevice = false) {
+__global__ void reluKernel(float* a, float* c, int totalSize) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+
+    if (idx < totalSize) {
+        // Apply ReLU directly
+        c[idx] = a[idx] > 0.0f ? a[idx] : 0.0f;
+    }
+}
+
+void applyRelu(float* a, float* c, int rowSize, int colSize, bool useDevice = false, dim3 blockSize = dim3(1)) {
     if (!useDevice) {
+        // CPU execution
         for (int i = 0; i < rowSize; i++) {
             for (int j = 0; j < colSize; j++) {
                 int idx = i * colSize + j;
-                c[idx] = unary(a[idx]);          
+                c[idx] = a[idx] > 0.0f ? a[idx] : 0.0f; // Apply ReLU on CPU
             }
         }
+    } else {
+        // GPU execution
+        int totalSize = rowSize * colSize;
+        float* d_a, *d_c;
+
+        // Allocate device memory
+        CHECK(cudaMalloc((void**)&d_a, totalSize * sizeof(float)));
+        CHECK(cudaMalloc((void**)&d_c, totalSize * sizeof(float)));
+
+        // Copy input data to device
+        cudaMemcpy(d_a, a, totalSize * sizeof(float), cudaMemcpyHostToDevice);
+
+        // Configure the kernel launch
+        int gridSize = (totalSize + blockSize.x - 1) / blockSize.x;
+
+        // Launch the kernel
+        reluKernel<<<gridSize, blockSize>>>(d_a, d_c, totalSize);
+
+        // Copy the result back to host
+        cudaMemcpy(c, d_c, totalSize * sizeof(float), cudaMemcpyDeviceToHost);
+
+        // Free device memory
+        cudaFree(d_a);
+        cudaFree(d_c);
     }
 }
 
@@ -680,7 +774,7 @@ void forward(float* input, float** hiddenWeights, float** activations, float** b
             elementWiseBinary(&Z[i][j * HIDDEN_SIZE], bias[i], &Z[i][j * HIDDEN_SIZE], HIDDEN_SIZE, 1, addition);
         }
 
-        elementWiseUnary(Z[i], activations[i], batchSize, HIDDEN_SIZE, applyRelu);
+        applyRelu(Z[i], activations[i], batchSize, HIDDEN_SIZE,useDevice, blockSize);
 
         currentInputSize = HIDDEN_SIZE;
         currentInput = activations[i];
@@ -692,26 +786,12 @@ void forward(float* input, float** hiddenWeights, float** activations, float** b
         elementWiseBinary(&zOutput[j * outputSize], bias[NUM_HIDDEN_LAYERS], &zOutput[j * outputSize], outputSize, 1, addition);
     }
 
-    softmax(zOutput, output,batchSize, outputSize);
-
-
+    softmax(zOutput, output, batchSize, outputSize);
 }
 
 
 float decayedLR(float orgLR, float decayRate, int step, int decaySteps){
     return orgLR * (float)pow(decayRate, ((step * 1.0)/ decaySteps));
-}
-
-float jumpDecay(int step) {
-    if (step >= 50) {
-        return 0.00001;
-    }
-    else if (step >= 25) {
-        return 0.00005;
-    }
-    else {
-        return 0.0001;
-    }
 }
 
 float updateWeight(float& org, float& grad) {
@@ -746,6 +826,7 @@ void backward(float* input, float* output, float* targetLabels, float** hiddenWe
     dim3 blockSize(32, 32);
     if (!useDevice) blockSize = dim3(1);
 
+
     for (int layer = NUM_HIDDEN_LAYERS; layer >= 0; layer--) {
         int currSize = (layer == NUM_HIDDEN_LAYERS) ? outputSize : HIDDEN_SIZE;
         int prevSize = (layer == 0) ? featureSize : HIDDEN_SIZE;
@@ -755,7 +836,7 @@ void backward(float* input, float* output, float* targetLabels, float** hiddenWe
         matrixMultiplication(activationsTransposed, prevSize, batchSize, gradientToLoss, currSize, gradWeights[layer], useDevice, blockSize);
       
         free(activationsTransposed);
-        computeGradientForBias(gradientToLoss, gradBias[layer], batchSize, currSize);
+        computeGradientForBias(gradientToLoss, gradBias[layer], batchSize, currSize, useDevice, blockSize);
 
         if (layer == 0) break;
 
@@ -821,15 +902,17 @@ float calculateAccuracy(float* output, float* trueLabels, int batchSize, int num
     return correct * 1.0;
 }
 
-void train(float** dataset, float* labels, float** hiddenWeights, float** bias, int epochSize, int batchSize, int featureSize, int totalSize, const char* configFile,int step_save = 5, int outputSize = 10) {
+void train(float** dataset, float* labels, float** hiddenWeights, float** bias, int epochSize, int batchSize, int featureSize, int totalSize, const char* configFile,bool useDevice,int step_save = 5, int outputSize = 10) {
     int decaySteps = 100000;
     float decayRate = 0.9995;
     int steps = 0;
-
+    float totalTime = 0.0f;
     for (int epoch = 0; epoch < epochSize; epoch++) {
         double totalLoss = 0.0;
         double totalAccuracy = 0.0;
         int numBatch = (totalSize - 1) / batchSize + 1;
+        GpuTimer timer;
+        timer.Start();
         for (int batchIdx = 0; batchIdx < numBatch; batchIdx++) {
             int startIdx = batchIdx * batchSize;
             int end = ((startIdx + batchSize) > totalSize) ? (totalSize - startIdx) : batchSize;
@@ -847,12 +930,12 @@ void train(float** dataset, float* labels, float** hiddenWeights, float** bias, 
 
             float* zOutput = allocMatrix(end, outputSize);
             float* output = allocMatrix(end, outputSize);
-            forward(dataset[batchIdx], hiddenWeights, activations, bias, output,Z, zOutput, outputSize, end, true);
+            forward(dataset[batchIdx], hiddenWeights, activations, bias, output,Z, zOutput, outputSize, end, useDevice);
 
             totalLoss += calculateCrossEntropyLoss(output, batchLabels, end, outputSize);
             totalAccuracy += calculateAccuracy(output, batchLabels, end, outputSize);
 
-            backward(dataset[batchIdx], output, batchLabels, hiddenWeights, activations, bias, Z, zOutput, end, true);
+            backward(dataset[batchIdx], output, batchLabels, hiddenWeights, activations, bias, Z, zOutput, end, useDevice);
             steps++;
 
             free(output);
@@ -864,12 +947,10 @@ void train(float** dataset, float* labels, float** hiddenWeights, float** bias, 
             free(activations);
             free(Z);
         }
-
+        timer.Stop();
         totalLoss /= totalSize;
         totalAccuracy /= totalSize;
         LR = decayedLR(LR, decayRate, steps, decaySteps);
-       // LR = lrDecay(beta1, beta2, epoch, epochSize);
-        // printf("Epoch %d - LR: %f\n", epoch + 1, LR);
 
         if ((epoch + 1) % step_save == 0) {
             char saveFile[256];
@@ -884,10 +965,13 @@ void train(float** dataset, float* labels, float** hiddenWeights, float** bias, 
                 modifyConfig(configFile, "BEST_ACCURACY", accuracyStr);
             }
         }
-        printf("Epoch %d, Loss: %.4f, Accuracy: %.4f\n", epoch + 1, totalLoss, totalAccuracy);
-
-    }
-
+        float time = timer.Elapsed();
+        printf("Epoch %d, Loss: %.4f, Accuracy: %.4f, Time (seconds): %.4f\n", epoch + 1, totalLoss, totalAccuracy, time / 1000);
+        totalTime += time;
+   }
+    
+    printf("Processing time (%s): %f s\n\n", useDevice == true? "use device" : "use host", ((totalTime / epochSize) / 1000));
+    
     for (int i = 0; i <= NUM_HIDDEN_LAYERS; i++) {
         free(hiddenWeights[i]);
         free(bias[i]);
@@ -898,7 +982,7 @@ void train(float** dataset, float* labels, float** hiddenWeights, float** bias, 
 
 
 // Test model
-void test(float** dataset, float* labels, float** hiddenWeights, float** bias, int featureSize, int batchSize, int totalSize, int outputSize = 10) {
+void test(float** dataset, float* labels, float** hiddenWeights, float** bias, int featureSize, int batchSize, int totalSize, int outputSize = 10, bool useDevice = false) {
     double totalAccuracy = 0.0f;
     int numBatch = (totalSize - 1) / batchSize + 1;
     for (int batchIdx = 0; batchIdx < numBatch; batchIdx++) {
@@ -918,7 +1002,7 @@ void test(float** dataset, float* labels, float** hiddenWeights, float** bias, i
 
         float* zOutput = allocMatrix(end, outputSize);
         float* output = allocMatrix(end, outputSize);
-        forward(dataset[batchIdx], hiddenWeights, activations, bias, output,Z, zOutput, outputSize, end, true);
+        forward(dataset[batchIdx], hiddenWeights, activations, bias, output,Z, zOutput, outputSize, end, useDevice);
 
         totalAccuracy += calculateAccuracy(output, batchLabels, end, outputSize);
 
@@ -951,20 +1035,11 @@ int main(int argc, char *argv[]) {
         }
     }
 
-    // Create checkpoint folder
-    if (_mkdir("./checkpoints") == 0) {
-        printf("Checkpoint directory created: %s\n", "./checkpoints");
-    } else if (errno == EEXIST) {
-        printf("Directory already exists!\n");
-    } else {
-        perror("Error creating directory!\n");
-    }
-
     loadConfig(configFile);
     int train_image_count, train_label_count, test_image_count, test_label_count;
     int image_size;
-
-    const int epochs = 1000;
+    bool useDevice = false;
+    const int epochs = 3;
     const int batchSize = 32 * 5;
 
     float** hiddenWeights = (float**)malloc((NUM_HIDDEN_LAYERS + 1) * sizeof(float*));
@@ -981,8 +1056,8 @@ int main(int argc, char *argv[]) {
             int prevSize = (i == 0) ? image_size : HIDDEN_SIZE;
             int currSize = (i == NUM_HIDDEN_LAYERS) ? OUTPUT_SIZE : HIDDEN_SIZE;
 
-            hiddenWeights[i] = initRandomMatrix(prevSize, currSize, -0.5, 0.5);
-            bias[i] = initRandomMatrix(currSize,1, 0.0, 0.0);
+            hiddenWeights[i] = initHeMatrix(prevSize, currSize);
+            bias[i] = initFilledMatrix(currSize,1, 0.0);
             printf("At layer %d: (%d,%d)\n", i, prevSize, currSize);
         }
         bool check = initWANDB(hiddenWeights, bias, image_size, OUTPUT_SIZE, runTest);
@@ -1015,7 +1090,7 @@ int main(int argc, char *argv[]) {
             return 1;
         }
 
-        train(train_images, train_labels, hiddenWeights, bias, epochs, batchSize, image_size, train_image_count, configFile,10);
+        train(train_images, train_labels, hiddenWeights, bias, epochs, batchSize, image_size, train_image_count, configFile,useDevice,10);
         int numBatch = (train_image_count - 1) / batchSize + 1;
 
         for (int i = 0; i < numBatch; i++) {
