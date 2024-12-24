@@ -951,7 +951,7 @@ void forward(float* input, float** hiddenWeights, float** activations, float** b
         matrixMultiplication(currentInput, batchSize, currentInputSize, hiddenWeights[i], HIDDEN_SIZE, Z[i], useDevice, blockSize);
 
         for (int j = 0; j < batchSize; j++) {
-            elementWiseBinary(&Z[i][j * HIDDEN_SIZE], bias[i], &Z[i][j * HIDDEN_SIZE], HIDDEN_SIZE, 1, addition, 0, blockSize, useDevice);
+            elementWiseBinary(&Z[i][j * HIDDEN_SIZE], bias[i], &Z[i][j * HIDDEN_SIZE], HIDDEN_SIZE, 1, addition, 0, blockSize, false);
         }
 
         applyRelu(Z[i], activations[i], batchSize, HIDDEN_SIZE,useDevice, blockSize);
@@ -963,7 +963,7 @@ void forward(float* input, float** hiddenWeights, float** activations, float** b
     matrixMultiplication(currentInput, batchSize, HIDDEN_SIZE, hiddenWeights[NUM_HIDDEN_LAYERS], outputSize, zOutput, useDevice, blockSize);
 
     for (int j = 0; j < batchSize; j++) {
-        elementWiseBinary(&zOutput[j * outputSize], bias[NUM_HIDDEN_LAYERS], &zOutput[j * outputSize], outputSize, 1, addition, 0, blockSize, useDevice);
+        elementWiseBinary(&zOutput[j * outputSize], bias[NUM_HIDDEN_LAYERS], &zOutput[j * outputSize], outputSize, 1, addition, 0, blockSize, false);
     }
 
     softmax(zOutput, output, batchSize, outputSize,useDevice, blockSize);
@@ -1023,7 +1023,7 @@ void backward(float* input, float* output, float* targetLabels, float** hiddenWe
  
 
         //For derivative of ReLu is a > 0 ? 1.0 : 0.0, and compute of element wise. So it would better to combine the two operation into 1
-        elementWiseBinary(previousGradient, Z[layer - 1], previousGradient, batchSize, prevSize, retainPositive, 2, blockSize, useDevice); 
+        elementWiseBinary(previousGradient, Z[layer - 1], previousGradient, batchSize, prevSize, retainPositive, 2, blockSize, false); 
 
         free(weightsTransposed);
         if(layer < NUM_HIDDEN_LAYERS) 
