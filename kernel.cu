@@ -927,8 +927,7 @@ void elementWiseBinary(float* a, float* b, float* c, int rowSize, int colSize, f
         
         cudaMemcpy(d_a, a, bytes, cudaMemcpyHostToDevice);
         cudaMemcpy(d_b, b, bytes, cudaMemcpyHostToDevice);
-        // dim3 gridSize(((colSize) + blockSize.x - 1) / blockSize.x, ((rowSize) + blockSize.y - 1) / blockSize.y);
-        dim3 gridSize((colSize  - 1) / blockSize.x + 1, (rowSize - 1) / blockSize.y + 1);
+        dim3 gridSize(((colSize) + blockSize.x - 1) / blockSize.x, ((rowSize) + blockSize.y - 1) / blockSize.y);
         binaryKernel<<<gridSize, blockSize>>>(d_a, d_b, d_c, rowSize, colSize, opCode);
         cudaMemcpy(c, d_c, bytes, cudaMemcpyDeviceToHost);
 
@@ -1210,7 +1209,7 @@ int main(int argc, char *argv[]) {
     loadConfig(configFile);
     int train_image_count, train_label_count, test_image_count, test_label_count;
     int image_size;
-    bool useDevice = false;
+    bool useDevice = true;
     const int epochs = 3;
     const int batchSize = 32 * 10;
 

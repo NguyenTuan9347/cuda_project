@@ -7,3 +7,4 @@
 config.txt
 checkpoints/
 tmp*
+*.nsys-rep
