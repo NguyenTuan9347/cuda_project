@@ -591,7 +591,7 @@ __global__ void matrixMultiKernel(float* A, float* B, float* C, int m, int n, in
 }
 
 
-__global__ void updateWeightKernel(float* hiddenWeight, float* grad, int rowSize, int colSize, float d_LR) {
+__global__ void updateWeightKernel(float* hiddenWeight, float* grad, int rowSize, int colSize,float d_LR) {
     int i = blockIdx.y * blockDim.y + threadIdx.y;
     int j = blockIdx.x * blockDim.x + threadIdx.x;
     int idx = i * colSize + j;
@@ -1210,7 +1210,7 @@ int main(int argc, char *argv[]) {
     loadConfig(configFile);
     int train_image_count, train_label_count, test_image_count, test_label_count;
     int image_size;
-    bool useDevice = true;
+    bool useDevice = false;
     const int epochs = 3;
     const int batchSize = 32 * 10;
 
