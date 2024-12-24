@@ -1197,6 +1197,8 @@ int main(int argc, char *argv[]) {
     // ./a.exe test config.txt
     bool runTest = false;
     char configFile[256] = "config.txt";
+    bool useDevice = false;
+    char configFile[256] = "config.txt";
     if (argc > 1) {
         if (strcmp(argv[1], "test") == 0) {
             runTest = true;
@@ -1204,12 +1206,17 @@ int main(int argc, char *argv[]) {
         if (argc > 2) {
             strcpy(configFile, argv[2]);
         }
+        if (argc > 3) {
+            if (strcmp(argv[3], "true") == 0) {
+                useDevice = true;
+            }
+        }
+
     }
 
     loadConfig(configFile);
     int train_image_count, train_label_count, test_image_count, test_label_count;
     int image_size;
-    bool useDevice = true;
     const int epochs = 3;
     const int batchSize = 32 * 10;
 
