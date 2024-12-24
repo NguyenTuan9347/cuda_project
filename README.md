@@ -82,6 +82,14 @@ Implement and optimize a neural network using CUDA C, focusing on:
 └── report.ipynb :   A  jupyter notebook presented detailed the process developing the project.
 ```
 
+- [Project contribution sheet](https://docs.google.com/spreadsheets/d/1jXhaWt9uKCy4tlFd3I2OVujs7iU_SCP3OkSvmtkmf6k/edit?gid=1314710876#gid=1314710876)
+
+- [Github repo: Group 7](https://github.com/NguyenTuan9347/cuda_project)
+
+- [Report.ipynb](https://colab.research.google.com/drive/1sZqh8kQ6TQHcECKI4WL-S_zr-3DXTbib?authuser=1#scrollTo=irUwvBB1iAtP)
+
+- [Video](https://www.youtube.com/watch?v=W9ZNJa1oP8M&feature=youtu.be)
+
 ### **1. Requirements**
 - **Hardware**: NVIDIA GPU with CUDA support.
 - **Software**:
