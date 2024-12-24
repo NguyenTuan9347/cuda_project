@@ -1,0 +1,14 @@
+NUM_HIDDEN_LAYERS=2
+MAX_IMAGESIZE=784
+NUM_TRAIN=60000
+NUM_TEST=10000
+SIZE=784
+LR=0.00005
+TRAIN_IMAGE=E:/Uni Documents/HCMUS_HK10/Parallel Programming/Final project real/fashion/train-images-idx3-ubyte
+TRAIN_LABEL=E:/Uni Documents/HCMUS_HK10/Parallel Programming/Final project real/fashion/train-labels-idx1-ubyte
+TEST_IMAGE=E:/Uni Documents/HCMUS_HK10/Parallel Programming/Final project real/fashion/t10k-images-idx3-ubyte
+TEST_LABEL=E:/Uni Documents/HCMUS_HK10/Parallel Programming/Final project real/fashion/t10k-labels-idx1-ubyte
+HIDDEN_SIZE=128
+OUTPUT_SIZE=10
+BEST_CHECKPOINT=best.txt
+BEST_ACCURACY=0.956433
