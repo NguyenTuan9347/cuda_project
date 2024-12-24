@@ -74,10 +74,10 @@ int NUM_TRAIN = 60000;
 int NUM_TEST = 10000;
 int SIZE = 784;
 float LR = 1e-4;
-char TRAIN_IMAGE[512] = "/content/cuda_project/fashion/train-images-idx3-ubyte";
-char TRAIN_LABEL[512] = "/content/cuda_project/fashion/train-labels-idx1-ubyte";
-char TEST_IMAGE[512] = "/content/cuda_project/fashion/t10k-images-idx3-ubyte";
-char TEST_LABEL[512] = "/content/cuda_project/fashion/t10k-labels-idx1-ubyte";
+char TRAIN_IMAGE[512] = "content/fashion/train-images-idx3-ubyte";
+char TRAIN_LABEL[512] = "content/fashion/train-labels-idx1-ubyte";
+char TEST_IMAGE[512] = "content/fashion/t10k-images-idx3-ubyte";
+char TEST_LABEL[512] = "content/fashion/t10k-labels-idx1-ubyte";
 int HIDDEN_SIZE = 128;
 int OUTPUT_SIZE = 10;
 char BEST_CHECKPOINT[512] = "None";
@@ -1211,7 +1211,7 @@ int main(int argc, char *argv[]) {
     int image_size;
     bool useDevice = true;
     const int epochs = 3;
-    const int batchSize = 32;
+    const int batchSize = 32 * 10;
 
     float** hiddenWeights = (float**)malloc((NUM_HIDDEN_LAYERS + 1) * sizeof(float*));
     float** bias = (float**)malloc((NUM_HIDDEN_LAYERS + 1) * sizeof(float*));
