@@ -796,11 +796,11 @@ void computeGradientForBias(float* gradToLoss, float* gradBias, int batchSize, i
         cudaMemcpy(d_gradBias, gradBias, totalSize * sizeof(float), cudaMemcpyHostToDevice);
         cudaMemcpy(d_gradToLoss, gradToLoss, totalSize * sizeof(float), cudaMemcpyHostToDevice);
 
-        dim3 gridSize((batchSize - 1) / blockSize.x + 1, (outputSize - 1) / blockSize.y + 1);
+        dim3 gridSize((outputSize - 1) / blockSize.x + 1, (outputSize - 1) / blockSize.y + 1);
 
         computeGradBiasKernel<<<gridSize, blockSize>>>(d_gradBias, d_gradToLoss, batchSize, outputSize);
 
-        cudaMemcpy(gradBias, d_gradBias, totalSize * sizeof(float), cudaMemcpyDeviceToHost);
+        cudaMemcpy(gradBias, d_gradBias, outputSize * sizeof(float), cudaMemcpyDeviceToHost);
 
         cudaFree(d_gradBias);
         cudaFree(d_gradToLoss);
