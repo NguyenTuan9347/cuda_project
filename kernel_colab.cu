@@ -74,10 +74,10 @@ int NUM_TRAIN = 60000;
 int NUM_TEST = 10000;
 int SIZE = 784;
 float LR = 1e-4;
-char TRAIN_IMAGE[512] = "content/fashion/train-images-idx3-ubyte";
-char TRAIN_LABEL[512] = "content/fashion/train-labels-idx1-ubyte";
-char TEST_IMAGE[512] = "content/fashion/t10k-images-idx3-ubyte";
-char TEST_LABEL[512] = "content/fashion/t10k-labels-idx1-ubyte";
+char TRAIN_IMAGE[512] = "content/cuda_project/fashion/train-images-idx3-ubyte";
+char TRAIN_LABEL[512] = "content/cuda_project/fashion/train-labels-idx1-ubyte";
+char TEST_IMAGE[512] = "content/cuda_project/fashion/t10k-images-idx3-ubyte";
+char TEST_LABEL[512] = "content/cuda_project/fashion/t10k-labels-idx1-ubyte";
 int HIDDEN_SIZE = 128;
 int OUTPUT_SIZE = 10;
 char BEST_CHECKPOINT[512] = "None";
@@ -157,7 +157,7 @@ void modifyConfig(const char* filename, const char* key, const char* newValue) {
         return;
     }
 
-    // Temporary array to store file content
+    // Temporary array to store file content/cuda_project
     char lines[20][512]; // Assuming the file has at most 20 lines, each line has 512 characters max
     int line_count = 0;
 
@@ -187,7 +187,7 @@ void modifyConfig(const char* filename, const char* key, const char* newValue) {
         return;
     }
 
-    // Write updated content back to the file
+    // Write updated content/cuda_project back to the file
     file = fopen(filename, "w");
     if (!file) {
         printf("Error: Unable to open file for writing '%s'\n", filename);
