@@ -4,7 +4,6 @@
 *.o
 *.gz
 *.vs
-config.txt
 checkpoints/
 tmp*
 *.nsys-rep
