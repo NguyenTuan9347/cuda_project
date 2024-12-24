@@ -1196,7 +1196,6 @@ int main(int argc, char *argv[]) {
     // Default run also works. Example command run:
     // ./a.exe test config.txt
     bool runTest = false;
-    char configFile[256] = "config.txt";
     bool useDevice = false;
     char configFile[256] = "config.txt";
     if (argc > 1) {
