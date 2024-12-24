@@ -767,7 +767,7 @@ void computeGradientForOutputLayer(float* output, float* gradOutput, float* targ
 }
 __global__ void computeGradBiasKernel(float* d_gradBias, float* d_gradToLoss, int batchSize, int outputSize) {
     int colIdx = blockDim.x * blockIdx.x + threadIdx.x;
-    int rowIdx = blockDim.x * blockIdx.x + threadIdx.y;
+    int rowIdx = blockDim.y * blockIdx.y + threadIdx.y;
     if (rowIdx < batchSize && colIdx < outputSize) {
         float addVal = d_gradToLoss[colIdx * outputSize + rowIdx];
         atomicAdd(&d_gradBias[colIdx], addVal);
