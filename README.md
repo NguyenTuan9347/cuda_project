@@ -8,7 +8,7 @@
 |------------------------|-----------|--------------------------------|
 | Nguyen Hoang Anh Tuan  | 21127471  | nhatuan21@clc.fitus.edu.vn     |
 | Phan Huy Duc Tai       | 21127687  | phdtai21@clc.fitus.edu.vn      |
-| Ho Dinh Duy Luc        | 21127351  | hddluc@clc.fitus.edu.vn        |
+| Ho Dinh Duy Luc        | 21127351  | hddluc21@clc.fitus.edu.vn        |
 
 
 ### **1. Background**
