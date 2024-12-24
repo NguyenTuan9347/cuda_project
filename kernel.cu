@@ -737,8 +737,8 @@ float* transpose(float* matrix, int rowSize, int colSize, bool useDevice = false
     else {
         float* d_in, * d_out;
         size_t nBytes = rowSize * colSize * sizeof(float);
-        CHECK(cudaMalloc(&d_in, nBytes));
-        CHECK(cudaMalloc(&d_out, nBytes));
+        CHECK(cudaMalloc((void**)&d_in, nBytes));
+        CHECK(cudaMalloc((void**)&d_out, nBytes));
 
         CHECK(cudaMemcpy(d_in, matrix, nBytes, cudaMemcpyHostToDevice));
 
