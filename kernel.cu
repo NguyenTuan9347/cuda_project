@@ -660,6 +660,9 @@ void updateWeights(float** hiddenWeights, float** grads, int featureSize, int ou
 
         for (int layer = 0; layer <= NUM_HIDDEN_LAYERS; layer++) {
             CHECK(cudaStreamSynchronize(streams[layer]));
+        }
+
+        for (int layer = 0; layer <= NUM_HIDDEN_LAYERS; layer++) {
             CHECK(cudaFree(d_hiddenWeights[layer]));
             CHECK(cudaFree(d_grads[layer]));
             CHECK(cudaStreamDestroy(streams[layer]));
@@ -1211,7 +1214,7 @@ int main(int argc, char *argv[]) {
     int image_size;
     bool useDevice = true;
     const int epochs = 3;
-    const int batchSize = 32 * 10;
+    const int batchSize = 32*5;
 
     float** hiddenWeights = (float**)malloc((NUM_HIDDEN_LAYERS + 1) * sizeof(float*));
     float** bias = (float**)malloc((NUM_HIDDEN_LAYERS + 1) * sizeof(float*));

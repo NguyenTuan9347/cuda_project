@@ -157,7 +157,7 @@ void modifyConfig(const char* filename, const char* key, const char* newValue) {
         return;
     }
 
-    // Temporary array to store file /content/cuda_project
+    // Temporary array to store file content
     char lines[20][512]; // Assuming the file has at most 20 lines, each line has 512 characters max
     int line_count = 0;
 
@@ -187,7 +187,7 @@ void modifyConfig(const char* filename, const char* key, const char* newValue) {
         return;
     }
 
-    // Write updated /content/cuda_project back to the file
+    // Write updated content back to the file
     file = fopen(filename, "w");
     if (!file) {
         printf("Error: Unable to open file for writing '%s'\n", filename);
@@ -737,8 +737,8 @@ float* transpose(float* matrix, int rowSize, int colSize, bool useDevice = false
     else {
         float* d_in, * d_out;
         size_t nBytes = rowSize * colSize * sizeof(float);
-        CHECK(cudaMalloc((void**)&d_in, nBytes));
-        CHECK(cudaMalloc((void**)&d_out, nBytes));
+        CHECK(cudaMalloc(&d_in, nBytes));
+        CHECK(cudaMalloc(&d_out, nBytes));
 
         CHECK(cudaMemcpy(d_in, matrix, nBytes, cudaMemcpyHostToDevice));
 
@@ -811,6 +811,14 @@ void computeGradientForBias(float* gradToLoss, float* gradBias, int batchSize, i
     }
 }
 
+float retainPositive(float& org, float& dest) {
+    return dest > 0 ? org : 0.0;
+}
+
+float multiply(float& a, float& b) {
+    return a * b;
+}
+
 __global__ void reluKernel(float* a, float* c, int totalSize) {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
 
@@ -847,70 +855,8 @@ void applyRelu(float* a, float* c, int rowSize, int colSize, bool useDevice = fa
     }
 }
 
-float retainPositive(float org, float dest) {
-    return dest > 0 ? org : 0.0;
-}
-
-float multiply(float a, float b) {
-    return a * b;
-}
-
-float addition(float a, float b) {
-    return a + b;
-}
-
-typedef float (*op_func_p) (float, float);
-
-__device__ float retainPositiveDevice(float org, float dest) {
-    return dest > 0 ? org : 0.0;
-}
-
-__device__ float multiplyDevice(float a, float b) {
-    return a * b;
-}
-
-__device__ float additionDevice(float a, float b) {
-    return a + b;
-}
-__device__ float updateWeightDevice(float org, float grad) {
-    return org - 0.00005 * grad;
-}
-__device__ __constant__ op_func_p h_addition = additionDevice;
-__device__ __constant__ op_func_p h_multiply = multiplyDevice;
-__device__ __constant__ op_func_p h_retain_positive = retainPositiveDevice;
-__device__ __constant__ op_func_p h_update_weight = updateWeightDevice;
-
-__device__ op_func_p getFunc(int opCode) {
-    switch (opCode) {
-    case 0:
-        return h_addition;
-    case 1:
-        return h_multiply;
-    case 2:
-        return h_retain_positive;
-    case 3:
-        return h_update_weight;
-    default:
-        return h_addition;
-    }
-}
-
-
-__global__ void binaryKernel(float* a, float* b, float* c, int rowSize, int colSize, int opCode) {
-    op_func_p binary = getFunc(opCode);
-    int row = blockDim.y * blockIdx.y + threadIdx.y;
-    int col = blockDim.x * blockIdx.x + threadIdx.x;
-
-    if (row < rowSize && col < colSize) {
-        int i = row * colSize + col;
-        c[i] = binary(a[i], b[i]);
-    }
-
-}
-
-void elementWiseBinary(float* a, float* b, float* c, int rowSize, int colSize, float (*binary)(float, float), int opCode, dim3 blockSize = dim3(1), bool useDevice = false) {
+void elementWiseBinary(float* a, float* b, float* c, int rowSize, int colSize, float (*binary)(float&, float&), bool useDevice = false) {
     if (!useDevice) {
-        // printf("Not using device\n");
         for (int i = 0; i < rowSize; i++) {
             for (int j = 0; j < colSize; j++) {
                 int idx = i * colSize + j;
@@ -918,25 +864,11 @@ void elementWiseBinary(float* a, float* b, float* c, int rowSize, int colSize, f
             }
         }
     }
-    else {
-        float *d_a, *d_b, *d_c;
-        size_t bytes = rowSize * colSize * sizeof(float);
-        cudaMalloc((void**)&d_a, bytes);
-        cudaMalloc((void**)&d_b, bytes);
-        cudaMalloc((void**)&d_c, bytes);
-        
-        cudaMemcpy(d_a, a, bytes, cudaMemcpyHostToDevice);
-        cudaMemcpy(d_b, b, bytes, cudaMemcpyHostToDevice);
-        dim3 gridSize(((colSize) + blockSize.x - 1) / blockSize.x, ((rowSize) + blockSize.y - 1) / blockSize.y);
-        binaryKernel<<<gridSize, blockSize>>>(d_a, d_b, d_c, rowSize, colSize, opCode);
-        cudaMemcpy(c, d_c, bytes, cudaMemcpyDeviceToHost);
-
-        cudaFree(d_a);
-        cudaFree(d_b);
-        cudaFree(d_c);
-    }
 }
 
+float addition(float& a, float& b) {
+    return a + b;
+}
 
 void forward(float* input, float** hiddenWeights, float** activations, float** bias, float* output, float** Z, float* zOutput, 
     int outputSize, int batchSize, bool useDevice = false, int featureSize = 784) {
@@ -951,7 +883,7 @@ void forward(float* input, float** hiddenWeights, float** activations, float** b
         matrixMultiplication(currentInput, batchSize, currentInputSize, hiddenWeights[i], HIDDEN_SIZE, Z[i], useDevice, blockSize);
 
         for (int j = 0; j < batchSize; j++) {
-            elementWiseBinary(&Z[i][j * HIDDEN_SIZE], bias[i], &Z[i][j * HIDDEN_SIZE], HIDDEN_SIZE, 1, addition, 0, blockSize, false);
+            elementWiseBinary(&Z[i][j * HIDDEN_SIZE], bias[i], &Z[i][j * HIDDEN_SIZE], HIDDEN_SIZE, 1, addition);
         }
 
         applyRelu(Z[i], activations[i], batchSize, HIDDEN_SIZE,useDevice, blockSize);
@@ -963,7 +895,7 @@ void forward(float* input, float** hiddenWeights, float** activations, float** b
     matrixMultiplication(currentInput, batchSize, HIDDEN_SIZE, hiddenWeights[NUM_HIDDEN_LAYERS], outputSize, zOutput, useDevice, blockSize);
 
     for (int j = 0; j < batchSize; j++) {
-        elementWiseBinary(&zOutput[j * outputSize], bias[NUM_HIDDEN_LAYERS], &zOutput[j * outputSize], outputSize, 1, addition, 0, blockSize, false);
+        elementWiseBinary(&zOutput[j * outputSize], bias[NUM_HIDDEN_LAYERS], &zOutput[j * outputSize], outputSize, 1, addition);
     }
 
     softmax(zOutput, output, batchSize, outputSize,useDevice, blockSize);
@@ -1023,7 +955,7 @@ void backward(float* input, float* output, float* targetLabels, float** hiddenWe
  
 
         //For derivative of ReLu is a > 0 ? 1.0 : 0.0, and compute of element wise. So it would better to combine the two operation into 1
-        elementWiseBinary(previousGradient, Z[layer - 1], previousGradient, batchSize, prevSize, retainPositive, 2, blockSize, false); 
+        elementWiseBinary(previousGradient, Z[layer - 1], previousGradient, batchSize, prevSize, retainPositive); 
 
         free(weightsTransposed);
         if(layer < NUM_HIDDEN_LAYERS) 
@@ -1209,9 +1141,9 @@ int main(int argc, char *argv[]) {
     loadConfig(configFile);
     int train_image_count, train_label_count, test_image_count, test_label_count;
     int image_size;
-    bool useDevice = true;
+    bool useDevice = false;
     const int epochs = 3;
-    const int batchSize = 16;
+    const int batchSize = 32 * 10;
 
     float** hiddenWeights = (float**)malloc((NUM_HIDDEN_LAYERS + 1) * sizeof(float*));
     float** bias = (float**)malloc((NUM_HIDDEN_LAYERS + 1) * sizeof(float*));
