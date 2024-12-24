@@ -742,7 +742,7 @@ float* transpose(float* matrix, int rowSize, int colSize, bool useDevice = false
 
         CHECK(cudaMemcpy(d_in, matrix, nBytes, cudaMemcpyHostToDevice));
 
-        dim3 gridSize((colSize - 1) / blockSize.x + 1, (rowSize - 1) / blockSize.y + 1);
+        dim3 gridSize((rowSize - 1) / blockSize.x + 1, (colSize - 1) / blockSize.y + 1);
 
         transpose_kernel<< <gridSize, blockSize >> > (d_in, d_out, rowSize,colSize);
 
@@ -769,7 +769,7 @@ __global__ void computeGradBiasKernel(float* d_gradBias, float* d_gradToLoss, in
     int colIdx = blockDim.x * blockIdx.x + threadIdx.x;
     int rowIdx = blockDim.y * blockIdx.y + threadIdx.y;
     if (rowIdx < batchSize && colIdx < outputSize) {
-        float addVal = d_gradToLoss[colIdx * outputSize + rowIdx];
+        float addVal = d_gradToLoss[rowIdx * outputSize + colIdx];
         atomicAdd(&d_gradBias[colIdx], addVal);
     }
 }
