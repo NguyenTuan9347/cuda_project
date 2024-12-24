@@ -1211,7 +1211,7 @@ int main(int argc, char *argv[]) {
     int image_size;
     bool useDevice = true;
     const int epochs = 3;
-    const int batchSize = 32 * 10;
+    const int batchSize = 32;
 
     float** hiddenWeights = (float**)malloc((NUM_HIDDEN_LAYERS + 1) * sizeof(float*));
     float** bias = (float**)malloc((NUM_HIDDEN_LAYERS + 1) * sizeof(float*));
