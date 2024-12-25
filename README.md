@@ -168,7 +168,7 @@ The project achieves:
 ## **VII. Conclusion**
 This project demonstrates the effectiveness of GPU acceleration in neural network training. CUDA-enabled parallel computing significantly reduces computational time while maintaining accuracy. While the implementation highlights areas for optimization, it serves as a foundation for exploring more advanced deep learning techniques.
 
-# VIII. Reference:
+## VIII. Reference:
 1. Desai, Y. (1970, January 1). Tiled matrix multiplication using shared memory in Cuda. TILED Matrix Multiplication Using Shared Memory in CUDA. https://www.cstechera.com/2016/03/tiled-matrix-multiplication-using-shared-memory-in-cuda.html
 
 2. An efficient matrix transpose in CUDA C/C++. NVIDIA Technical Blog. (2022, August 21). https://developer.nvidia.com/blog/efficient-matrix-transpose-cuda-cc/
